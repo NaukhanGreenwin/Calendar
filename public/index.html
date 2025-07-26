@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Calendar Extractor</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📅 Email Calendar Extractor</h1>
+            <p>Extract calendar events from your email content using AI</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <label for="emailContent">Paste your email content below:</label>
+                
+                <div class="input-options">
+                    <div class="input-tabs">
+                        <button type="button" class="tab-btn active" data-tab="rich">📧 Rich Content (HTML/Images)</button>
+                        <button type="button" class="tab-btn" data-tab="plain">📝 Plain Text</button>
+                        <button type="button" class="tab-btn" data-tab="file">📎 Upload File</button>
+                    </div>
+                </div>
+
+                <!-- Rich content input -->
+                <div id="richInput" class="input-container active">
+                    <div 
+                        id="richContent" 
+                        class="rich-editor"
+                        contenteditable="true"
+                        data-placeholder="Paste your email here (supports HTML formatting, images, and rich text)..."
+                    ></div>
+                    <div class="input-info">
+                        💡 <strong>Tip:</strong> Paste directly from your email client to preserve formatting, links, and images
+                    </div>
+                </div>
+
+                <!-- Plain text input -->
+                <div id="plainInput" class="input-container">
+                    <textarea 
+                        id="emailContent" 
+                        placeholder="Paste the plain text body of your email here..."
+                        rows="12"
+                        maxlength="50000"
+                    ></textarea>
+                </div>
+
+                <!-- File upload input -->
+                <div id="fileInput" class="input-container">
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <input type="file" id="fileUpload" accept=".eml,.msg,.txt,.html,.pdf" hidden>
+                        <div class="upload-content">
+                            <div class="upload-icon">📎</div>
+                            <div class="upload-text">
+                                <strong>Drop email file here or click to browse</strong>
+                                <div class="upload-formats">Supports: .eml, .msg, .txt, .html, .pdf files</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="character-count">
+                    <span id="charCount">0</span> / 50,000 characters
+                </div>
+            </div>
+
+            <div class="button-section">
+                <button id="extractBtn" type="button">
+                    <span class="btn-text">🔍 Generate Calendar Event</span>
+                    <span class="btn-loading" style="display: none;">⏳ Processing...</span>
+                </button>
+            </div>
+
+            <div id="results" class="results-section" style="display: none;">
+                <h3>📋 Extracted Event Details</h3>
+                <div id="eventDetails" class="event-details"></div>
+                
+                <div class="download-section">
+                    <button id="downloadBtn" class="download-btn">
+                        📥 Download .ics Calendar File
+                    </button>
+                </div>
+            </div>
+
+            <div id="error" class="error-section" style="display: none;">
+                <div class="error-content">
+                    <h3>❌ Error</h3>
+                    <p id="errorMessage"></p>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="security-notice">
+                <h4>🔒 Security & Privacy</h4>
+                <ul>
+                    <li>All processing is done securely on the server</li>
+                    <li>Your email content is not stored permanently</li>
+                    <li>Data is transmitted over HTTPS encryption</li>
+                    <li>Rate limiting prevents abuse</li>
+                </ul>
+            </div>
+            <div class="usage-tips">
+                <h4>💡 Tips for Best Results</h4>
+                <ul>
+                    <li>Include emails with clear date and time information</li>
+                    <li>Meeting invitations work particularly well</li>
+                    <li>Make sure location details are mentioned in the email</li>
+                    <li>The AI can handle various date formats and time zones</li>
+                </ul>
+            </div>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
