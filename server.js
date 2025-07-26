@@ -460,18 +460,24 @@ YEAR RULES - CRITICAL:
 - If year appears to be in the past (2024 or earlier), assume it's 2025
 - Future events should have realistic years (2025-2030 range)
 
-TIME RULES - FOLLOW EXACTLY:
+TIME RULES - CRITICAL - NO MISTAKES ALLOWED:
+1PM = hour 13 (1:00 PM afternoon)
+2PM = hour 14 (2:00 PM afternoon)  
+3PM = hour 15 (3:00 PM afternoon) ⭐ IMPORTANT
+4PM = hour 16 (4:00 PM afternoon)
+5PM = hour 17 (5:00 PM evening)
 10:00am = hour 10 (morning)
-10:00pm = hour 22 (evening) 
-1:00pm = hour 13 (afternoon)
-1:00am = hour 1 (night)
+10:00pm = hour 22 (evening)
 12:00pm = hour 12 (noon)
 12:00am = hour 0 (midnight)
 
-EXAMPLES:
+CRITICAL EXAMPLES:
+"Wednesday, August 6th at 3PM" = "2025-08-06T15:00:00.000Z" ⭐ 3PM = 15:00
 "December 18, 2025 at 10:00am" = "2025-12-18T10:00:00.000Z"
 "July 31, 2025 at 01:00 PM" = "2025-07-31T13:00:00.000Z"
-"Monday, March 15th at 2pm" = "2025-03-15T14:00:00.000Z" (assume 2025)
+"Monday, March 15th at 2pm" = "2025-03-15T14:00:00.000Z"
+
+NEVER CONFUSE PM WITH AM - 3PM is ALWAYS 15:00, NEVER 11:00!
 
 MEETING LINKS:
 - Look for actual URLs containing: teams, zoom, webex, meet, conference
@@ -542,44 +548,69 @@ Return ONLY this JSON (no markdown, no explanation):
       }
     }
 
-    // SERVER-SIDE TIME CORRECTION - Fix AI mistakes
+    // ENHANCED SERVER-SIDE TIME CORRECTION - Aggressive Fix for AI mistakes
     function correctTimeExtraction(eventData, emailContent) {
-      const timeRegex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi;
-      const matches = [...emailContent.matchAll(timeRegex)];
+      // Multiple regex patterns to catch various time formats
+      const timePatterns = [
+        /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // Standard: 3PM, 3:00PM
+        /(\d{1,2})\s*(?:o'?clock)?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // 3 o'clock PM
+        /at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // at 3PM
+        /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b/gi   // Boundary check
+      ];
       
-      if (matches.length > 0) {
-        const match = matches[0];
-        const emailHour = parseInt(match[1]);
-        const emailMinute = match[2] ? parseInt(match[2]) : 0;
-        const emailIsPM = match[3].toLowerCase().includes('p');
+      let foundTime = null;
+      
+      // Try each pattern to find time
+      for (const pattern of timePatterns) {
+        const matches = [...emailContent.matchAll(pattern)];
+        if (matches.length > 0) {
+          foundTime = matches[0];
+          console.log(`🔍 FOUND TIME PATTERN: "${foundTime[0]}" using pattern ${pattern}`);
+          break;
+        }
+      }
+      
+      if (foundTime) {
+        const emailHour = parseInt(foundTime[1]);
+        const emailMinute = foundTime[2] ? parseInt(foundTime[2]) : 0;
+        const amPmText = foundTime[3].toLowerCase();
+        const emailIsPM = amPmText.includes('p');
         
         // Convert to 24-hour format
         let correctHour = emailHour;
         if (emailIsPM && emailHour !== 12) {
-          correctHour = emailHour + 12;
+          correctHour = emailHour + 12;  // 3PM = 15:00
         } else if (!emailIsPM && emailHour === 12) {
-          correctHour = 0;
+          correctHour = 0;  // 12AM = 00:00
         }
         
-        // Check if AI got it wrong
+        // Get AI's extracted time
         const aiDate = new Date(eventData.startDate);
         const aiHour = aiDate.getHours();
+        const aiMinute = aiDate.getMinutes();
         
-        if (aiHour !== correctHour) {
-          console.log(`🔧 CORRECTING TIME: AI extracted ${aiHour}:00, email shows ${correctHour}:${emailMinute.toString().padStart(2,'0')}`);
+        console.log(`⏰ EMAIL TIME: ${emailHour}${emailIsPM ? 'PM' : 'AM'} = ${correctHour}:${emailMinute.toString().padStart(2,'0')}`);
+        console.log(`🤖 AI EXTRACTED: ${aiHour}:${aiMinute.toString().padStart(2,'0')}`);
+        
+        // ALWAYS FORCE CORRECTION if times don't match exactly
+        if (aiHour !== correctHour || Math.abs(aiMinute - emailMinute) > 5) {
+          console.log(`🔧 FORCE CORRECTING TIME: AI extracted ${aiHour}:${aiMinute.toString().padStart(2,'0')}, email clearly shows ${correctHour}:${emailMinute.toString().padStart(2,'0')}`);
           
-          // Fix the start date
+          // Force fix the start date
           aiDate.setHours(correctHour, emailMinute, 0, 0);
           eventData.startDate = aiDate.toISOString();
           
-          // Fix the end date (add 1 hour)
+          // Force fix the end date (add 1 hour)
           const endDate = new Date(aiDate);
           endDate.setHours(correctHour + 1, emailMinute, 0, 0);
           eventData.endDate = endDate.toISOString();
           
+          console.log(`✅ CORRECTED TO: ${correctHour}:${emailMinute.toString().padStart(2,'0')} (${correctHour > 12 ? correctHour-12 : correctHour}${correctHour >= 12 ? 'PM' : 'AM'})`);
           return true; // Correction made
         }
       }
+      
+      console.log(`❌ NO TIME PATTERN FOUND in: "${emailContent.substring(0, 200)}..."`);
       return false; // No correction needed
     }
     
