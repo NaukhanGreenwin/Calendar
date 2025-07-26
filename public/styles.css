@@ -254,6 +254,11 @@ textarea::placeholder {
 .button-section {
     text-align: center;
     margin-bottom: 30px;
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
 }
 
 #extractBtn {
@@ -280,6 +285,31 @@ textarea::placeholder {
     cursor: not-allowed;
     transform: none;
     box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+}
+
+/* Clear button */
+.clear-btn {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+    min-width: 140px;
+}
+
+.clear-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+    background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
+}
+
+.clear-btn:active {
+    transform: translateY(0);
 }
 
 /* Results section */
@@ -504,6 +534,17 @@ footer {
     .rich-editor {
         min-height: 250px;
     }
+    
+    .button-section {
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    #extractBtn,
+    .clear-btn {
+        width: 100%;
+        min-width: auto;
+    }
 }
 
 @media (max-width: 480px) {
@@ -522,6 +563,11 @@ footer {
     #extractBtn {
         padding: 14px 28px;
         font-size: 1rem;
+    }
+    
+    .clear-btn {
+        padding: 12px 20px;
+        font-size: 0.95rem;
     }
 }
 

@@ -3,6 +3,7 @@ const emailTextarea = document.getElementById('emailContent');
 const richContentDiv = document.getElementById('richContent');
 const charCountSpan = document.getElementById('charCount');
 const extractBtn = document.getElementById('extractBtn');
+const clearBtn = document.getElementById('clearBtn');
 const btnText = document.querySelector('.btn-text');
 const btnLoading = document.querySelector('.btn-loading');
 const resultsSection = document.getElementById('results');
@@ -293,6 +294,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Setup keyboard shortcuts
     setupKeyboardShortcuts();
     
+    // Setup clear button
+    clearBtn.addEventListener('click', function() {
+        if (confirm('Are you sure you want to clear all content? This action cannot be undone.')) {
+            clearAll();
+        }
+    });
+    
     // Initial setup
     updateCharacterCount();
     richContentDiv.focus();
@@ -508,6 +516,46 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Clear all functionality
+function clearAll() {
+    // Clear all input fields
+    emailTextarea.value = '';
+    richContentDiv.innerHTML = '';
+    
+    // Reset file upload area
+    const fileUploadArea = document.getElementById('fileUploadArea');
+    fileUploadArea.innerHTML = `
+        <div class="upload-content">
+            <div class="upload-icon">📎</div>
+            <div class="upload-text">
+                <strong>Drop email file here or click to browse</strong>
+                <div class="upload-formats">Supports: .eml, .msg, .txt, .html, .pdf files</div>
+            </div>
+        </div>
+    `;
+    fileUploadArea.classList.remove('processing');
+    
+    // Reset file input
+    const fileInput = document.getElementById('fileUpload');
+    fileInput.value = '';
+    
+    // Hide results and errors
+    hideResults();
+    hideError();
+    
+    // Reset character count
+    updateCharacterCount();
+    
+    // Reset to rich content tab
+    switchInputTab('rich');
+    
+    // Focus on rich content input
+    richContentDiv.focus();
+    
+    // Show success message briefly
+    showSuccess('✨ All content cleared!');
 }
 
 
