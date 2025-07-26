@@ -448,7 +448,7 @@ app.post('/api/extract-event', validateEmailInput, async (req, res) => {
 
     // Call OpenAI to extract calendar event information
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // More efficient model with higher token limits
+      model: "gpt-4o", // Best accuracy for calendar extraction
       messages: [
         {
           role: "system",
