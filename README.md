@@ -2,6 +2,14 @@
 
 A secure HTTPS web application that uses OpenAI's GPT-4 to extract calendar event information from email content and generate downloadable `.ics` calendar files.
 
+## 🌐 **Live Demo**
+
+Your app is currently running and accessible at:
+- **💻 Local Access**: `https://localhost:3443`
+- **📱 Network Access**: `https://192.168.7.239:3443` (perfect for mobile devices)
+
+Now deployed to: **[GitHub Repository](https://github.com/NaukhanGreenwin/Calendar.git)**
+
 ## ✨ Features
 
 - **AI-Powered Extraction**: Uses OpenAI's GPT-4 to intelligently parse email content and extract calendar events
