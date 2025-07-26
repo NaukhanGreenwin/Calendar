@@ -72,6 +72,16 @@ const upload = multer({
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Health check endpoint for monitoring
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // Input validation middleware
 const validateEmailInput = [
   body('emailContent')
@@ -632,27 +642,20 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// HTTPS server setup
+// Server setup
 function startServer() {
-  if (process.env.NODE_ENV === 'production') {
-    // In production, use proper SSL certificates
-    const privateKey = fs.readFileSync(process.env.SSL_PRIVATE_KEY || '/path/to/private-key.pem', 'utf8');
-    const certificate = fs.readFileSync(process.env.SSL_CERTIFICATE || '/path/to/certificate.pem', 'utf8');
-    const ca = fs.readFileSync(process.env.SSL_CA || '/path/to/ca-bundle.pem', 'utf8');
-
-    const credentials = {
-      key: privateKey,
-      cert: certificate,
-      ca: ca
-    };
-
-    const httpsServer = https.createServer(credentials, app);
-    httpsServer.listen(PORT, '0.0.0.0', () => {
-      console.log(`HTTPS Server running on port ${PORT}`);
-      console.log(`Network access available on local IP`);
+  // Check if we're on Render or other cloud platforms
+  const isCloudPlatform = process.env.RENDER || process.env.HEROKU || process.env.VERCEL || process.env.NODE_ENV === 'production';
+  
+  if (isCloudPlatform) {
+    // On cloud platforms, use HTTP as they handle SSL termination
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'production'}`);
+      console.log(`✅ Ready to accept requests`);
     });
   } else {
-    // For development, create self-signed certificate
+    // For local development, try HTTPS first, fallback to HTTP
     try {
       const privateKey = fs.readFileSync('./certs/key.pem', 'utf8');
       const certificate = fs.readFileSync('./certs/cert.pem', 'utf8');
@@ -661,17 +664,17 @@ function startServer() {
       const httpsServer = https.createServer(credentials, app);
       
       httpsServer.listen(PORT, '0.0.0.0', () => {
-        console.log(`HTTPS Server running on https://localhost:${PORT}`);
-        console.log(`Network access: https://192.168.7.239:${PORT}`);
-        console.log('Note: Using self-signed certificate for development');
+        console.log(`🔒 HTTPS Server running on https://localhost:${PORT}`);
+        console.log(`📱 Network access: https://192.168.7.239:${PORT}`);
+        console.log('🛡️  Note: Using self-signed certificate for development');
       });
     } catch (error) {
-      console.log('SSL certificates not found. Run "npm run generate-certs" first');
-      console.log('Falling back to HTTP for development...');
+      console.log('⚠️  SSL certificates not found. Run "npm run generate-certs" first');
+      console.log('🔄 Falling back to HTTP for development...');
       app.listen(PORT, '0.0.0.0', () => {
-        console.log(`HTTP Server running on http://localhost:${PORT}`);
-        console.log(`Network access: http://192.168.7.239:${PORT}`);
-        console.log('WARNING: Running in HTTP mode - not secure for production!');
+        console.log(`🌐 HTTP Server running on http://localhost:${PORT}`);
+        console.log(`📱 Network access: http://192.168.7.239:${PORT}`);
+        console.log('⚠️  WARNING: Running in HTTP mode - not secure for production!');
       });
     }
   }

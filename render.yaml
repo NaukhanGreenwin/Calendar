@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: email-calendar-extractor
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OPENAI_API_KEY
+        sync: false  # This will be set manually in Render dashboard
+    scaling:
+      minInstances: 1
+      maxInstances: 1 
