@@ -146,6 +146,39 @@ function extractMeetingLinks(emailContent) {
   return foundLinks.length > 0 ? foundLinks[0] : null;
 }
 
+// Function to ensure dates are 2025 or later
+function correctEventYear(eventData, originalEmail) {
+  const warnings = [];
+  const currentYear = new Date().getFullYear();
+  const minimumYear = Math.max(2025, currentYear);
+  
+  try {
+    const startDate = new Date(eventData.startDate);
+    const endDate = new Date(eventData.endDate);
+    
+    // Check if year needs correction
+    if (startDate.getFullYear() < minimumYear) {
+      console.log(`🔧 YEAR CORRECTION: Event year ${startDate.getFullYear()} -> ${minimumYear}`);
+      
+      // Correct start date year
+      startDate.setFullYear(minimumYear);
+      eventData.startDate = startDate.toISOString();
+      
+      // Correct end date year to match
+      endDate.setFullYear(minimumYear);
+      eventData.endDate = endDate.toISOString();
+      
+      warnings.push(`✅ Year automatically corrected to ${minimumYear} (ensuring future dates).`);
+      return { corrected: true, warnings };
+    }
+    
+    return { corrected: false, warnings: [] };
+  } catch (error) {
+    console.error('Year correction error:', error);
+    return { corrected: false, warnings: [] };
+  }
+}
+
 // Function to validate extracted date logic
 function validateEventData(eventData, originalEmail) {
   const warnings = [];
@@ -154,10 +187,20 @@ function validateEventData(eventData, originalEmail) {
     const startDate = new Date(eventData.startDate);
     const endDate = new Date(eventData.endDate);
     const now = new Date();
+    const currentYear = new Date().getFullYear();
+    const minimumYear = Math.max(2025, currentYear);
     
-    // Check if date is in the past
-    if (startDate < now) {
-      warnings.push(`Event date appears to be in the past (${startDate.getFullYear()}). This might be incorrect.`);
+    // Check if date is before minimum year (should be caught by correction, but double-check)
+    if (startDate.getFullYear() < minimumYear) {
+      warnings.push(`⚠️ Event year (${startDate.getFullYear()}) is before ${minimumYear}. Please verify the year.`);
+    }
+    
+    // Check if date is in the past (but be more lenient for current year events)
+    if (startDate < now && startDate.getFullYear() <= currentYear) {
+      const daysDiff = Math.ceil((now - startDate) / (1000 * 60 * 60 * 24));
+      if (daysDiff > 7) {
+        warnings.push(`Event date appears to be ${daysDiff} days in the past. Please verify the date.`);
+      }
     }
     
     // Check if date is too far in the future (more than 2 years)
@@ -411,6 +454,12 @@ app.post('/api/extract-event', validateEmailInput, async (req, res) => {
           role: "system",
           content: `Extract calendar event from email text. Return JSON only.
 
+YEAR RULES - CRITICAL:
+- ALWAYS use 2025 or later for event dates
+- If year is ambiguous or missing, default to 2025
+- If year appears to be in the past (2024 or earlier), assume it's 2025
+- Future events should have realistic years (2025-2030 range)
+
 TIME RULES - FOLLOW EXACTLY:
 10:00am = hour 10 (morning)
 10:00pm = hour 22 (evening) 
@@ -422,8 +471,13 @@ TIME RULES - FOLLOW EXACTLY:
 EXAMPLES:
 "December 18, 2025 at 10:00am" = "2025-12-18T10:00:00.000Z"
 "July 31, 2025 at 01:00 PM" = "2025-07-31T13:00:00.000Z"
+"Monday, March 15th at 2pm" = "2025-03-15T14:00:00.000Z" (assume 2025)
 
-JSON format:
+MEETING LINKS:
+- Look for actual URLs containing: teams, zoom, webex, meet, conference
+- If you see "Click Here to Join" but no actual URL, set meetingLink to "MEETING_LINK_PRESENT_BUT_NOT_EXTRACTED"
+
+Return ONLY this JSON (no markdown, no explanation):
 {
   "title": "event title",
   "startDate": "YYYY-MM-DDTHH:MM:SS.000Z",
@@ -532,17 +586,26 @@ JSON format:
     // Apply time correction
     const timeCorrected = correctTimeExtraction(eventData, emailContent);
     
+    // Apply year correction (ensure 2025 or later)
+    const yearCorrection = correctEventYear(eventData, emailContent);
+    
     // Validate the extracted event data
     const warnings = validateEventData(eventData, emailContent);
     
+    // Add correction warnings
     if (timeCorrected) {
       warnings.unshift('✅ Time was automatically corrected based on email content.');
     }
     
-    // Debug logging for time extraction
+    if (yearCorrection.corrected) {
+      warnings.unshift(...yearCorrection.warnings);
+    }
+    
+    // Debug logging for extractions
     console.log('DEBUG - Original email excerpt:', emailContent.substring(0, 500));
     console.log('DEBUG - AI extracted start date:', eventData.startDate);
     console.log('DEBUG - Time corrected:', timeCorrected);
+    console.log('DEBUG - Year corrected:', yearCorrection.corrected);
     console.log('DEBUG - Validation warnings:', warnings);
 
     // Generate ICS file content
