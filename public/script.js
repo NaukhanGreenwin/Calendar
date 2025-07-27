@@ -11,8 +11,7 @@ const eventDetailsDiv = document.getElementById('eventDetails');
 const downloadBtn = document.getElementById('downloadBtn');
 const errorSection = document.getElementById('error');
 const errorMessage = document.getElementById('errorMessage');
-const fileUpload = document.getElementById('fileUpload');
-const fileUploadArea = document.getElementById('fileUploadArea');
+
 
 // Global variables
 let currentIcsContent = '';
@@ -290,8 +289,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // Setup file upload
-    setupFileUpload();
+
 
     // Setup content change listeners
     richContentDiv.addEventListener('input', updateCharacterCount);

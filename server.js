@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
+const LocationEnhancer = require('./location-enhancer');
 // const GeocodingService = require('./geocoding-service'); // Uncomment to enable geocoding
 
 // Load environment variables from .env file
@@ -21,6 +22,7 @@ class CalendarService {
     this.app = express();
     this.port = process.env.PORT || 7860;
     this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    this.locationEnhancer = new LocationEnhancer();
     
     this.initializeMiddleware();
     this.initializeRoutes();
@@ -191,6 +193,10 @@ class CalendarService {
    * Validates and normalizes a single event's date strings
    */
   validateAndNormalizeSingleEvent(eventData, userCurrentTime = null) {
+    // Enhance location data with known addresses
+    if (eventData.locationDetails) {
+      eventData.locationDetails = this.locationEnhancer.enhanceLocation(eventData.locationDetails);
+    }
     if (!eventData.startDate || !eventData.endDate) {
       throw new Error('Missing required date information');
     }
@@ -266,13 +272,19 @@ class CalendarService {
           - Look for phrases like "invited:", "attendees:", "participants:"
           - Include the sender and recipients as attendees
           - Format as: [{"name": "John Doe", "email": "john@company.com"}, ...]
-      4b. **Location Extraction (CRITICAL):**
+      4b. **Location Extraction with Address Intelligence (CRITICAL):**
           - ALWAYS extract location information if ANY is mentioned
-          - Look for: addresses, building names, room numbers, restaurant names, etc.
-          - For "CN Tower" → name: "CN Tower", address: "290 Bremner Blvd, Toronto, ON M5V 3L9"
-          - For "Jack Astors" → name: "Jack Astors", try to include address if known
-          - For "Conference Room B" → name: "Conference Room B", include building if mentioned
-          - NEVER leave location empty if ANY location info exists in the text
+          - Use your knowledge to provide full addresses for well-known places:
+            * "CN Tower" → name: "CN Tower", address: "290 Bremner Blvd, Toronto, ON M5V 3L9", isWellKnownPlace: true
+            * "Jack Astors" → name: "Jack Astors", address: "Multiple locations - specify if mentioned", city: "Toronto"
+            * "Rogers Centre" → name: "Rogers Centre", address: "1 Blue Jays Way, Toronto, ON M5V 1J1", isWellKnownPlace: true
+            * "Union Station" → name: "Union Station", address: "65 Front St W, Toronto, ON M5J 1E6", isWellKnownPlace: true
+            * "Pearson Airport" → name: "Toronto Pearson Airport", address: "6301 Silver Dart Dr, Mississauga, ON L5P 1B2", isWellKnownPlace: true
+            * "Eaton Centre" → name: "CF Toronto Eaton Centre", address: "220 Yonge St, Toronto, ON M5B 2H1", isWellKnownPlace: true
+          - For restaurants/chains, include typical address format: "Restaurant Name, [Area/Street if mentioned]"
+          - For office buildings, include full address if it's a known building
+          - For conference rooms, include building name and address if mentioned
+          - NEVER leave location fields empty if ANY location reference exists
       5.  **Location Intelligence:** 
           - Extract venue names, business names, or place names mentioned in the text
           - If you recognize well-known places (Google HQ, Apple Park, Harvard University, Central Park, etc.), provide their common address
