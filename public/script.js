@@ -269,129 +269,7 @@ function showSuccess(message) {
     }, 3000);
 }
 
-// Send email invites to attendees
-function sendEmailInvites() {
-    if (!currentEventData || !currentIcsContent) {
-        showError('No event data available to send invites.');
-        return;
-    }
-    
-    const event = currentEventData.events ? currentEventData.events[0] : currentEventData;
-    const attendees = event.attendees || [];
-    
-    if (attendees.length === 0) {
-        showError('No attendees found to send invites to.');
-        return;
-    }
-    
-    // Get attendee emails
-    const attendeeEmails = attendees.map(attendee => 
-        typeof attendee === 'object' ? attendee.email : attendee
-    ).filter(Boolean);
-    
-    if (attendeeEmails.length === 0) {
-        showError('No valid email addresses found for attendees.');
-        return;
-    }
-    
-    // Create email subject and body
-    const subject = `Calendar Invitation: ${event.title || 'Meeting'}`;
-    const startDate = new Date(event.startDate);
-    const endDate = new Date(event.endDate);
-    
-    const emailBody = `You're invited to: ${event.title || 'Meeting'}
 
-📅 Date: ${startDate.toLocaleDateString('en-US', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-    })}
-    
-⏰ Time: ${startDate.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit', 
-        hour12: true 
-    })} - ${endDate.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit', 
-        hour12: true 
-    })}
-
-${event.location ? `📍 Location: ${event.location}` : ''}
-
-${event.description ? `📋 Description: ${event.description}` : ''}
-
-Please find the calendar invitation attached as an .ics file. 
-Double-click the attachment to add this event to your calendar.
-
-Looking forward to seeing you there!`;
-
-    // Create mailto link with multiple recipients
-    const mailtoLink = `mailto:${attendeeEmails.join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
-    
-    // Open email client
-    window.location.href = mailtoLink;
-    
-    // Show instructions
-    showSuccess(`📧 Opening email client to send invites to ${attendeeEmails.length} attendee(s). Don't forget to attach the .ics file!`);
-    
-    // Also show a modal with instructions
-    showEmailInstructions(attendeeEmails);
-}
-
-function showEmailInstructions(attendeeEmails) {
-    const modal = document.createElement('div');
-    modal.className = 'modal';
-    modal.style.display = 'flex';
-    
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>📧 Send Calendar Invites</h3>
-                <button class="close-btn" onclick="this.closest('.modal').remove()">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="email-instructions">
-                    <h4>📋 Instructions:</h4>
-                    <ol>
-                        <li><strong>Your email client should open</strong> with a pre-filled message</li>
-                        <li><strong>Download the .ics file</strong> using the download button</li>
-                        <li><strong>Attach the .ics file</strong> to the email</li>
-                        <li><strong>Send the email</strong> to notify attendees</li>
-                    </ol>
-                    
-                    <div class="attendee-list-modal">
-                        <h4>👥 Sending to:</h4>
-                        ${attendeeEmails.map(email => `<div class="attendee-email-item">${email}</div>`).join('')}
-                    </div>
-                    
-                    <div class="email-note">
-                        <strong>💡 Pro Tip:</strong> When recipients receive the email and double-click the .ics attachment, 
-                        it will automatically add the event to their calendar with you as the organizer!
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="download-btn" onclick="document.getElementById('downloadBtn').click()">
-                    📥 Download .ics File
-                </button>
-                <button class="cancel-btn" onclick="this.closest('.modal').remove()">
-                    ✅ Got It
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Close on outside click
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-}
 
 // Get user's timezone for better context
 function getUserTimezone() {
@@ -434,11 +312,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
     
-    // Setup email invites button
-    const emailInvitesBtn = document.getElementById('emailInvitesBtn');
-    if (emailInvitesBtn) {
-        emailInvitesBtn.addEventListener('click', sendEmailInvites);
-    }
+
 
     // Initial setup
     updateCharacterCount();
@@ -800,7 +674,7 @@ function displayEventDetails(eventData, warnings) {
                 
                 attendeesHtml += `
                     <div class="attendees-note">
-                        💡 To send invites: Use the "📧 Send Email Invites" button below, or manually email the .ics file to attendees
+                        💡 Attendees will receive calendar invites when you import this .ics file into your calendar app
                     </div>
                 </div>`;
                 fieldDiv.innerHTML = attendeesHtml;
