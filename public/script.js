@@ -269,6 +269,15 @@ function showSuccess(message) {
     }, 3000);
 }
 
+// Get user's timezone for better context
+function getUserTimezone() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (error) {
+        return 'Unknown';
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     // Setup tab switching
@@ -304,6 +313,38 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initial setup
     updateCharacterCount();
     richContentDiv.focus();
+    
+    // Display user's timezone and current time
+    const timezoneDisplay = document.getElementById('timezoneDisplay');
+    if (timezoneDisplay) {
+        const timezone = getUserTimezone();
+        const now = new Date();
+        const timeString = now.toLocaleString('en-US', { 
+            timeZone: timezone, 
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit', 
+            minute: '2-digit',
+            timeZoneName: 'short'
+        });
+        timezoneDisplay.textContent = `🌍 Your current time: ${timeString}`;
+        
+        // Update time every minute
+        setInterval(() => {
+            const currentTime = new Date();
+            const updatedTimeString = currentTime.toLocaleString('en-US', { 
+                timeZone: timezone, 
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit', 
+                minute: '2-digit',
+                timeZoneName: 'short'
+            });
+            timezoneDisplay.textContent = `🌍 Your current time: ${updatedTimeString}`;
+        }, 60000); // Update every minute
+    }
 });
 
 // Legacy character count functionality (keeping for compatibility)
@@ -330,6 +371,7 @@ extractBtn.addEventListener('click', async function() {
     hideError();
     
     try {
+        const now = new Date();
         const response = await fetch('/api/extract-event', {
             method: 'POST',
             headers: {
@@ -338,7 +380,24 @@ extractBtn.addEventListener('click', async function() {
             body: JSON.stringify({
                 emailContent: emailContent,
                 htmlContent: content.html,
-                inputType: activeInputType
+                inputType: activeInputType,
+                userTimezone: getUserTimezone(),
+                userCurrentTime: {
+                    iso: now.toISOString(),
+                    local: now.toLocaleString('en-US', { 
+                        timeZone: getUserTimezone(),
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        timeZoneName: 'short'
+                    }),
+                    timestamp: now.getTime(),
+                    timezoneOffset: now.getTimezoneOffset()
+                }
             })
         });
         
@@ -352,7 +411,7 @@ extractBtn.addEventListener('click', async function() {
         currentIcsContent = data.icsContent;
         
         // Display results
-        displayEventDetails(data.eventData, data.warnings);
+        displayEventDetails(data.eventData, data.eventData.warnings || data.warnings);
         showResults();
         
     } catch (error) {
@@ -450,11 +509,55 @@ function displayEventDetails(eventData, warnings) {
     const fields = [
         { label: 'Title', value: eventData.title, icon: '📝' },
         { label: 'Start Date', value: formatDate(eventData.startDate), icon: '📅' },
-        { label: 'End Date', value: formatDate(eventData.endDate), icon: '📅' },
-        { label: 'Location', value: eventData.location, icon: '📍' },
+        { label: 'End Date', value: formatDate(eventData.endDate), icon: '📅' }
+    ];
+
+    // Add enhanced location information
+    if (eventData.locationDetails && (eventData.locationDetails.name || eventData.locationDetails.address)) {
+        const locationParts = [];
+        
+        if (eventData.locationDetails.name) {
+            locationParts.push(eventData.locationDetails.name);
+        }
+        
+        if (eventData.locationDetails.address) {
+            locationParts.push(eventData.locationDetails.address);
+        } else {
+            // Build address from components
+            const addressParts = [];
+            if (eventData.locationDetails.city) addressParts.push(eventData.locationDetails.city);
+            if (eventData.locationDetails.state) addressParts.push(eventData.locationDetails.state);
+            if (eventData.locationDetails.country) addressParts.push(eventData.locationDetails.country);
+            if (addressParts.length > 0) {
+                locationParts.push(addressParts.join(', '));
+            }
+        }
+        
+        const locationValue = locationParts.join(' • ');
+        const locationIcon = eventData.locationDetails.isWellKnownPlace ? '🏢' : '📍';
+        
+        fields.push({ 
+            label: 'Location', 
+            value: locationValue, 
+            icon: locationIcon,
+            isLocation: true,
+            locationDetails: eventData.locationDetails
+        });
+    } else if (eventData.location) {
+        // Fallback to simple location
+        fields.push({ label: 'Location', value: eventData.location, icon: '📍' });
+    }
+
+    // Add other fields
+    fields.push(
         { label: 'Meeting Link', value: eventData.meetingLink, icon: '🔗', isLink: true },
         { label: 'Description', value: eventData.description, icon: '📋' }
-    ];
+    );
+    
+    // Add timezone info if available
+    if (eventData.timezone) {
+        fields.splice(-2, 0, { label: 'Timezone', value: eventData.timezone, icon: '🌍' });
+    }
     
     fields.forEach(field => {
         if (field.value && field.value.trim()) {
@@ -474,6 +577,36 @@ function displayEventDetails(eventData, warnings) {
                         <span><a href="${escapeHtml(field.value)}" target="_blank" rel="noopener noreferrer" class="meeting-link">${escapeHtml(field.value)}</a></span>
                     `;
                 }
+            } else if (field.isLocation && field.locationDetails) {
+                // Handle enhanced location display
+                let locationHtml = `<strong>${field.icon} ${field.label}:</strong><div class="location-details">`;
+                
+                if (field.locationDetails.name) {
+                    locationHtml += `<div class="location-name">${escapeHtml(field.locationDetails.name)}</div>`;
+                }
+                
+                if (field.locationDetails.address) {
+                    locationHtml += `<div class="location-address">📍 ${escapeHtml(field.locationDetails.address)}</div>`;
+                }
+                
+                if (field.locationDetails.isWellKnownPlace) {
+                    locationHtml += `<div class="location-note">✨ Well-known location</div>`;
+                }
+                
+                // Add Google Maps link if we have address info
+                const addressForMaps = field.locationDetails.address || 
+                    [field.locationDetails.name, field.locationDetails.city, field.locationDetails.state]
+                    .filter(Boolean).join(', ');
+                
+                if (addressForMaps) {
+                    const mapsUrl = `https://maps.google.com/maps?q=${encodeURIComponent(addressForMaps)}`;
+                    locationHtml += `<div class="location-actions">
+                        <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="maps-link">🗺️ View on Maps</a>
+                    </div>`;
+                }
+                
+                locationHtml += '</div>';
+                fieldDiv.innerHTML = locationHtml;
             } else {
                 fieldDiv.innerHTML = `
                     <strong>${field.icon} ${field.label}:</strong>
@@ -498,7 +631,11 @@ function formatDate(dateString) {
         const date = new Date(dateString);
         if (isNaN(date.getTime())) return 'Invalid date';
         
-        return date.toLocaleString('en-US', {
+        // Check if the date string ends with 'Z' (UTC) or has timezone info
+        const isUTC = dateString.endsWith('Z');
+        const hasTimezone = dateString.includes('+') || dateString.includes('-') || dateString.endsWith('Z');
+        
+        let formatOptions = {
             weekday: 'long',
             year: 'numeric',
             month: 'long',
@@ -506,8 +643,23 @@ function formatDate(dateString) {
             hour: '2-digit',
             minute: '2-digit',
             timeZoneName: 'short'
-        });
+        };
+        
+        // If the original date was in UTC, show it in user's local timezone
+        // If it has no timezone info, assume it's already in the correct timezone
+        if (isUTC) {
+            // Don't specify timeZone, let it use user's local timezone
+            return date.toLocaleString('en-US', formatOptions);
+        } else if (hasTimezone) {
+            // Has timezone info, let the browser handle it
+            return date.toLocaleString('en-US', formatOptions);
+        } else {
+            // No timezone info, treat as local time
+            formatOptions.timeZone = undefined;
+            return date.toLocaleString('en-US', formatOptions);
+        }
     } catch (error) {
+        console.error('Date formatting error:', error);
         return 'Invalid date';
     }
 }

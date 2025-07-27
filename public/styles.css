@@ -238,6 +238,13 @@ textarea::placeholder {
     color: #6c757d;
 }
 
+.timezone-info {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: #6c757d;
+    opacity: 0.8;
+}
+
 .content-warning {
     background: #fff3cd;
     border: 1px solid #ffeaa7;
@@ -364,6 +371,9 @@ textarea::placeholder {
     margin-bottom: 12px;
     padding-bottom: 12px;
     border-bottom: 1px solid #f1f3f4;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
 }
 
 .event-field:last-child {
@@ -372,10 +382,16 @@ textarea::placeholder {
 }
 
 .event-field strong {
-    display: inline-block;
-    width: 100px;
+    flex-shrink: 0;
+    min-width: 120px;
     color: #495057;
     font-weight: 600;
+}
+
+.event-field span,
+.event-field .location-details {
+    flex: 1;
+    color: #2c3e50;
 }
 
 .event-field span {
@@ -405,6 +421,58 @@ textarea::placeholder {
     border-radius: 4px;
     font-weight: 500;
     border-left: 3px solid #ff9800;
+}
+
+.location-details {
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 3px solid #28a745;
+    width: 100%;
+}
+
+.location-name {
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 4px;
+    font-size: 1.05em;
+}
+
+.location-address {
+    color: #495057;
+    margin-bottom: 6px;
+    font-size: 0.95em;
+}
+
+.location-note {
+    color: #6f42c1;
+    font-size: 0.85em;
+    font-style: italic;
+    margin-bottom: 8px;
+}
+
+.location-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #dee2e6;
+}
+
+.maps-link {
+    display: inline-block;
+    color: #007bff;
+    text-decoration: none;
+    padding: 6px 12px;
+    background: #e3f2fd;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.maps-link:hover {
+    background: #bbdefb;
+    text-decoration: none;
+    transform: translateY(-1px);
 }
 
 .download-section {
@@ -568,6 +636,15 @@ footer {
     .clear-btn {
         padding: 12px 20px;
         font-size: 0.95rem;
+    }
+    
+    .event-field {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .event-field strong {
+        min-width: auto;
     }
 }
 

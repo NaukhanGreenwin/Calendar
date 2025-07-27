@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -10,835 +8,449 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { v4: uuidv4 } = require('uuid');
-const multer = require('multer');
-const pdfParse = require('pdf-parse');
+// const GeocodingService = require('./geocoding-service'); // Uncomment to enable geocoding
 
-const app = express();
-const PORT = process.env.PORT || 3443;
+// Load environment variables from .env file
+require('dotenv').config();
 
-// Initialize OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  },
-}));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 100 : 10, // Higher limit for development
-  message: 'Too many requests from this IP, please try again later.',
-});
-
-app.use(limiter);
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'https://localhost:3443',
-  credentials: true,
-}));
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Multer configuration for file uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['.pdf', '.eml', '.msg', '.txt', '.html'];
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(fileExt)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only PDF, EML, MSG, TXT, and HTML files are allowed.'));
-    }
-  }
-});
-
-// Serve static files
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Health check endpoint for monitoring
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Input validation middleware
-const validateEmailInput = [
-  body('emailContent')
-    .isLength({ min: 10, max: 50000 })
-    .withMessage('Email content must be between 10 and 50000 characters')
-    .escape()
-    .trim(),
-  body('htmlContent')
-    .optional()
-    .isLength({ max: 100000 })
-    .withMessage('HTML content too large'),
-  body('inputType')
-    .optional()
-    .isIn(['rich', 'plain', 'file'])
-    .withMessage('Invalid input type'),
-];
-
-// Function to extract meeting links as fallback
-function extractMeetingLinks(emailContent) {
-  const linkPatterns = [
-    /https?:\/\/[\w-]+\.zoom\.us\/[^\s<>"']*/gi,
-    /https?:\/\/[\w-]+\.zoom\.com\/[^\s<>"']*/gi,
-    /https?:\/\/teams\.microsoft\.com\/[^\s<>"']*/gi,
-    /https?:\/\/teams\.live\.com\/[^\s<>"']*/gi,
-    /https?:\/\/[\w-]+\.webex\.com\/[^\s<>"']*/gi,
-    /https?:\/\/meet\.google\.com\/[^\s<>"']*/gi,
-    /https?:\/\/[\w-]+\.gotomeeting\.com\/[^\s<>"']*/gi,
-    /https?:\/\/[\w-]+\.bluejeans\.com\/[^\s<>"']*/gi,
-    // More general patterns for meeting links
-    /https?:\/\/[^\s<>"']*(?:meeting|join|conference|call|hearing)[^\s<>"']*/gi,
-    /https?:\/\/[^\s<>"']*teams[^\s<>"']*/gi
-  ];
-  
-  const foundLinks = [];
-  
-  // First try specific patterns
-  linkPatterns.forEach(pattern => {
-    const matches = emailContent.match(pattern);
-    if (matches) {
-      foundLinks.push(...matches);
-    }
-  });
-  
-  // If no links found, try to extract from HTML href attributes
-  if (foundLinks.length === 0) {
-    const hrefPattern = /href\s*=\s*["']([^"']*(?:teams|zoom|webex|meet|meeting|join|conference|call|hearing)[^"']*)["']/gi;
-    let match;
-    while ((match = hrefPattern.exec(emailContent)) !== null) {
-      foundLinks.push(match[1]);
-    }
-  }
-  
-  // If still no links but we see "Click Here to Join" or similar, indicate there should be a link
-  if (foundLinks.length === 0) {
-    const joinTextPattern = /(click\s+here\s+to\s+join|join\s+the\s+hearing|join\s+meeting)/gi;
-    if (joinTextPattern.test(emailContent)) {
-      return "MEETING_LINK_PRESENT_BUT_NOT_EXTRACTED";
-    }
-  }
-  
-  // Return the first found link, or null if none
-  return foundLinks.length > 0 ? foundLinks[0] : null;
-}
-
-// Function to ensure dates are 2025 or later
-function correctEventYear(eventData, originalEmail) {
-  const warnings = [];
-  const currentYear = new Date().getFullYear();
-  const minimumYear = Math.max(2025, currentYear);
-  
-  try {
-    const startDate = new Date(eventData.startDate);
-    const endDate = new Date(eventData.endDate);
+/**
+ * A service to extract calendar events from text using AI.
+ */
+class CalendarService {
+  constructor() {
+    this.app = express();
+    this.port = process.env.PORT || 7860;
+    this.openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     
-    // Check if year needs correction
-    if (startDate.getFullYear() < minimumYear) {
-      console.log(`🔧 YEAR CORRECTION: Event year ${startDate.getFullYear()} -> ${minimumYear}`);
-      
-      // Correct start date year
-      startDate.setFullYear(minimumYear);
-      eventData.startDate = startDate.toISOString();
-      
-      // Correct end date year to match
-      endDate.setFullYear(minimumYear);
-      eventData.endDate = endDate.toISOString();
-      
-      warnings.push(`✅ Year automatically corrected to ${minimumYear} (ensuring future dates).`);
-      return { corrected: true, warnings };
-    }
-    
-    return { corrected: false, warnings: [] };
-  } catch (error) {
-    console.error('Year correction error:', error);
-    return { corrected: false, warnings: [] };
-  }
-}
-
-// Function to validate extracted date logic
-function validateEventData(eventData, originalEmail) {
-  const warnings = [];
-  
-  try {
-    const startDate = new Date(eventData.startDate);
-    const endDate = new Date(eventData.endDate);
-    const now = new Date();
-    const currentYear = new Date().getFullYear();
-    const minimumYear = Math.max(2025, currentYear);
-    
-    // Check if date is before minimum year (should be caught by correction, but double-check)
-    if (startDate.getFullYear() < minimumYear) {
-      warnings.push(`⚠️ Event year (${startDate.getFullYear()}) is before ${minimumYear}. Please verify the year.`);
-    }
-    
-    // Check if date is in the past (but be more lenient for current year events)
-    if (startDate < now && startDate.getFullYear() <= currentYear) {
-      const daysDiff = Math.ceil((now - startDate) / (1000 * 60 * 60 * 24));
-      if (daysDiff > 7) {
-        warnings.push(`Event date appears to be ${daysDiff} days in the past. Please verify the date.`);
-      }
-    }
-    
-    // Check if date is too far in the future (more than 2 years)
-    const twoYearsFromNow = new Date();
-    twoYearsFromNow.setFullYear(now.getFullYear() + 2);
-    if (startDate > twoYearsFromNow) {
-      warnings.push(`Event date is more than 2 years in the future. Please verify the year.`);
-    }
-    
-    // Check for time parsing issues with better regex
-    const timeRegex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi;
-    const matches = [...originalEmail.matchAll(timeRegex)];
-    
-    if (matches.length > 0) {
-      const match = matches[0];
-      const emailTimeFound = match[0];
-      const emailHour = parseInt(match[1]);
-      const emailMinute = match[2] ? parseInt(match[2]) : 0;
-      const emailIsPM = match[3].toLowerCase().includes('p');
-      
-      const extractedHour = startDate.getHours();
-      const extractedMinute = startDate.getMinutes();
-      
-      // Convert email time to 24-hour format
-      let expectedHour = emailHour;
-      if (emailIsPM && emailHour !== 12) {
-        expectedHour = emailHour + 12;
-      } else if (!emailIsPM && emailHour === 12) {
-        expectedHour = 0;
-      }
-      
-      // Check if extracted time matches expected time
-      if (extractedHour !== expectedHour || Math.abs(extractedMinute - emailMinute) > 5) {
-        const extractedTime = startDate.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit',
-          hour12: true 
-        });
-        warnings.push(`🚨 MAJOR TIME ERROR: Email shows "${emailTimeFound}" but extracted time is "${extractedTime}". Expected: ${expectedHour}:${emailMinute.toString().padStart(2,'0')}, got: ${extractedHour}:${extractedMinute.toString().padStart(2,'0')}.`);
-      }
-    }
-
-    // Check day of week consistency if mentioned in email
-    const emailLower = originalEmail.toLowerCase();
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const extractedDayIndex = startDate.getDay();
-    const extractedDayName = dayNames[extractedDayIndex];
-    
-    for (const dayName of dayNames) {
-      if (emailLower.includes(dayName) && dayName !== extractedDayName) {
-        warnings.push(`Email mentions "${dayName}" but extracted date falls on ${extractedDayName}. Please verify the date.`);
-        break;
-      }
-    }
-    
-    // Check if end date is before start date
-    if (endDate <= startDate) {
-      warnings.push(`End time appears to be before or same as start time. Please verify.`);
-    }
-    
-  } catch (error) {
-    warnings.push(`Date format validation failed. Please verify the extracted dates.`);
-  }
-  
-  return warnings;
-}
-
-// Function to generate ICS file content
-function generateICSContent(eventData) {
-  const now = new Date();
-  const timestamp = now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  
-  // Format dates for ICS
-  const formatICSDate = (dateStr) => {
-    if (!dateStr) return timestamp;
-    try {
-      const date = new Date(dateStr);
-      return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    } catch {
-      return timestamp;
-    }
-  };
-
-  const startDate = formatICSDate(eventData.startDate);
-  const endDate = formatICSDate(eventData.endDate);
-  const uid = uuidv4();
-
-  // Build description with meeting link if present
-  let description = eventData.description || '';
-  if (eventData.meetingLink) {
-    if (description) {
-      description += '\\n\\n';
-    }
-    description += `Join Meeting: ${eventData.meetingLink}`;
+    this.initializeMiddleware();
+    this.initializeRoutes();
+    this.initializeErrorHandling();
   }
 
-  return `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Email Calendar Extractor//EN
-CALSCALE:GREGORIAN
-METHOD:PUBLISH
-BEGIN:VEVENT
-UID:${uid}@email-calendar-extractor.com
-DTSTART:${startDate}
-DTEND:${endDate}
-SUMMARY:${eventData.title || 'Extracted Event'}
-DESCRIPTION:${description}
-LOCATION:${eventData.location || ''}
-STATUS:CONFIRMED
-SEQUENCE:0
-CREATED:${timestamp}
-LAST-MODIFIED:${timestamp}
-END:VEVENT
-END:VCALENDAR`;
-}
+  /**
+   * Configures all Express middleware.
+   */
+  initializeMiddleware() {
+    // Basic security with Helmet
+    this.app.use(helmet());
 
-// API endpoint to handle file uploads and text extraction
-app.post('/api/upload-file', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    // Rate limiting to prevent abuse
+    this.app.use(rateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 100,
+      message: { error: 'Too many requests, please try again later.' },
+    }));
 
-    const file = req.file;
-    const fileExt = path.extname(file.originalname).toLowerCase();
-    let extractedText = '';
+    // CORS for frontend communication
+    this.app.use(cors({
+      origin: process.env.FRONTEND_URL || `https://localhost:${this.port}`,
+      credentials: true,
+    }));
 
-    console.log(`Processing file: ${file.originalname} (${fileExt})`);
+    // Parsers for JSON and URL-encoded bodies
+    this.app.use(express.json({ limit: '10mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    switch (fileExt) {
-      case '.pdf':
-        try {
-          const pdfData = await pdfParse(file.buffer);
-          extractedText = pdfData.text;
-          console.log(`Extracted ${extractedText.length} characters from PDF`);
-        } catch (pdfError) {
-          console.error('PDF parsing error:', pdfError);
-          return res.status(400).json({ 
-            error: 'Failed to parse PDF file',
-            message: 'The PDF file may be corrupted, password-protected, or contain only images. Please try a text-based PDF or use plain text mode.'
-          });
-        }
-        break;
-      
-      case '.txt':
-      case '.html':
-      case '.eml':
-      case '.msg':
-        extractedText = file.buffer.toString('utf8');
-        break;
-      
-      default:
-        return res.status(400).json({ error: 'Unsupported file type' });
-    }
+    // Serve static files from the 'public' directory
+    this.app.use(express.static(path.join(__dirname, 'public')));
+  }
 
-    // Basic validation
-    if (!extractedText || extractedText.trim().length < 10) {
-      return res.status(400).json({ 
-        error: 'No readable text found in file',
-        message: 'The file appears to be empty or contains no extractable text. Please check the file and try again.'
-      });
-    }
-
-    if (extractedText.length > 50000) {
-      extractedText = extractedText.substring(0, 50000) + '\n\n[Content truncated to 50,000 characters]';
-    }
-
-    res.json({
-      success: true,
-      filename: file.originalname,
-      fileType: fileExt,
-      textLength: extractedText.length,
-      extractedText: extractedText
+  /**
+   * Sets up all API routes.
+   */
+  initializeRoutes() {
+    // Health check endpoint
+    this.app.get('/health', (req, res) => {
+      res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
     });
 
-  } catch (error) {
-    console.error('File upload error:', error);
-    res.status(500).json({ 
-      error: 'Failed to process file',
-      message: error.message 
+    // Endpoint to extract event details from content
+    this.app.post(
+      '/api/extract-event',
+      this.validateRequest(),
+      this.handleEventExtraction.bind(this)
+    );
+
+    // Endpoint to download the generated ICS file
+    this.app.post('/api/download-ics', this.handleIcsDownload.bind(this));
+  }
+
+  /**
+   * Centralized error handling middleware.
+   */
+  initializeErrorHandling() {
+    this.app.use((err, req, res, next) => {
+      console.error('Unhandled Error:', err);
+      res.status(500).json({ error: 'An internal server error occurred.' });
+    });
+
+    // 404 handler for unknown routes
+    this.app.use((req, res) => {
+      res.status(404).json({ error: 'Endpoint not found.' });
     });
   }
-});
 
-// API endpoint to extract calendar event from email content
-app.post('/api/extract-event', validateEmailInput, async (req, res) => {
-  try {
-    // Check for validation errors
+  /**
+   * Provides validation rules for the request body.
+   */
+  validateRequest() {
+    return [
+      body('emailContent')
+        .isLength({ min: 10, max: 25000 })
+        .withMessage('Content must be between 10 and 25,000 characters.')
+        .trim(),
+    ];
+  }
+
+  /**
+   * Handles the logic for the /api/extract-event endpoint.
+   */
+  async handleEventExtraction(req, res) {
+    // Return validation errors if any
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        error: 'Invalid input', 
-        details: errors.array() 
-      });
+      return res.status(400).json({ error: 'Invalid input', details: errors.array() });
     }
 
-    const { emailContent, htmlContent, inputType } = req.body;
-
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ 
-        error: 'OpenAI API key not configured' 
-      });
+    // Check for OpenAI API key
+    if (!this.openai.apiKey) {
+      console.error('OpenAI API key is not configured.');
+      return res.status(500).json({ error: 'Service is not configured.' });
     }
 
-    // Function to truncate content to stay within token limits
-    function truncateContent(content, maxLength = 6000) {
-      if (content.length <= maxLength) return content;
-      return content.substring(0, maxLength) + '\n\n[Content truncated for processing...]';
-    }
-
-    // Function to clean HTML content for AI processing
-    function cleanHtmlContent(html) {
-      if (!html) return '';
-      
-      // Remove script and style tags
-      let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-      cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-      
-      // Remove excessive whitespace and newlines
-      cleaned = cleaned.replace(/\s+/g, ' ');
-      cleaned = cleaned.replace(/\n\s*\n/g, '\n');
-      
-      return cleaned.trim();
-    }
-
-    // Prepare optimized content for AI
-    let contentForAI = emailContent;
-    
-    if (htmlContent && htmlContent.trim() && inputType === 'rich') {
-      const cleanedHtml = cleanHtmlContent(htmlContent);
-      
-      // If HTML is significantly different from plain text, include both but truncated
-      if (cleanedHtml.length > emailContent.length * 1.2) {
-        const truncatedHtml = truncateContent(cleanedHtml, 2500);
-        const truncatedText = truncateContent(emailContent, 2500);
-        contentForAI = `HTML Content:\n${truncatedHtml}\n\nText Content:\n${truncatedText}`;
-      } else {
-        // If HTML and text are similar, just use the longer one
-        contentForAI = cleanedHtml.length > emailContent.length ? cleanedHtml : emailContent;
-      }
-    }
-    
-    // Final truncation to ensure we stay within limits
-    contentForAI = truncateContent(contentForAI, 5000);
-
-    // Call OpenAI to extract calendar event information
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o", // Best accuracy for calendar extraction
-      messages: [
-        {
-          role: "system",
-          content: `Extract calendar event from email text. Return JSON only.
-
-YEAR RULES - CRITICAL:
-- ALWAYS use 2025 or later for event dates
-- If year is ambiguous or missing, default to 2025
-- If year appears to be in the past (2024 or earlier), assume it's 2025
-- Future events should have realistic years (2025-2030 range)
-
-TIME RULES - CRITICAL - NO MISTAKES ALLOWED:
-1PM = hour 13 (1:00 PM afternoon)
-2PM = hour 14 (2:00 PM afternoon)  
-3PM = hour 15 (3:00 PM afternoon) ⭐ IMPORTANT
-4PM = hour 16 (4:00 PM afternoon)
-5PM = hour 17 (5:00 PM evening)
-10:00am = hour 10 (morning)
-10:00pm = hour 22 (evening)
-12:00pm = hour 12 (noon)
-12:00am = hour 0 (midnight)
-
-CRITICAL EXAMPLES:
-"Wednesday, August 6th at 3PM" = "2025-08-06T15:00:00.000Z" ⭐ 3PM = 15:00
-"December 18, 2025 at 10:00am" = "2025-12-18T10:00:00.000Z"
-"July 31, 2025 at 01:00 PM" = "2025-07-31T13:00:00.000Z"
-"Monday, March 15th at 2pm" = "2025-03-15T14:00:00.000Z"
-
-NEVER CONFUSE PM WITH AM - 3PM is ALWAYS 15:00, NEVER 11:00!
-
-MEETING LINKS:
-- Look for actual URLs containing: teams, zoom, webex, meet, conference
-- If you see "Click Here to Join" but no actual URL, set meetingLink to "MEETING_LINK_PRESENT_BUT_NOT_EXTRACTED"
-
-Return ONLY this JSON (no markdown, no explanation):
-{
-  "title": "event title",
-  "startDate": "YYYY-MM-DDTHH:MM:SS.000Z",
-  "endDate": "YYYY-MM-DDTHH:MM:SS.000Z",
-  "location": "location",
-  "description": "description", 
-  "meetingLink": null,
-  "hasEvent": true
-}`
-        },
-        {
-          role: "user",
-          content: contentForAI
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 1000,
-    });
-
-    // Clean and parse the AI response
-    let responseContent = completion.choices[0].message.content.trim();
-    
-    // Remove markdown code blocks if present
-    if (responseContent.startsWith('```json')) {
-      responseContent = responseContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-    } else if (responseContent.startsWith('```')) {
-      responseContent = responseContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
-    }
-    
-    let eventData;
     try {
-      eventData = JSON.parse(responseContent);
-    } catch (parseError) {
-      console.error('JSON Parse Error:', parseError);
-      console.error('Raw AI Response:', completion.choices[0].message.content);
-      return res.status(500).json({
-        error: 'AI response format error',
-        message: 'The AI returned an invalid response format. Please try again or use shorter content.'
+      const { emailContent, userTimezone, userCurrentTime } = req.body;
+      
+      // Use AI to parse the content
+      const eventData = await this.parseContentWithAI(emailContent, userTimezone, userCurrentTime);
+      
+      if (!eventData || !eventData.hasEvent) {
+        return res.status(400).json({ error: 'No calendar event could be found in the provided content.' });
+      }
+
+      // Generate the .ics file content
+      const icsContent = this.generateIcsContent(eventData);
+
+      console.log(`Successfully extracted event: "${eventData.title}"`);
+
+      // Send the successful response
+      res.status(200).json({
+        success: true,
+        eventData,
+        icsContent,
       });
-    }
 
-    if (!eventData.hasEvent) {
-      return res.status(400).json({ 
-        error: 'No calendar event information found in the email content' 
-      });
+    } catch (error) {
+      console.error('Failed to extract event:', error);
+      res.status(500).json({ error: 'Failed to extract calendar event due to an internal error.' });
     }
-
-    // Fallback: If AI didn't extract a meeting link, try to find one manually
-    if (!eventData.meetingLink || eventData.meetingLink === 'null' || eventData.meetingLink === null) {
-      const extractedLink = extractMeetingLinks(emailContent);
-      if (extractedLink) {
-        eventData.meetingLink = extractedLink;
-      } else {
-        // Force check for meeting indicators in content
-        if (emailContent.toLowerCase().includes('click here to join') || 
-            emailContent.toLowerCase().includes('join the hearing') ||
-            emailContent.toLowerCase().includes('teams') ||
-            emailContent.toLowerCase().includes('zoom') ||
-            emailContent.toLowerCase().includes('virtual hearing')) {
-          eventData.meetingLink = "MEETING_LINK_PRESENT_BUT_NOT_EXTRACTED";
-        }
-      }
-    }
-
-    // NUCLEAR TIME CORRECTION - ABSOLUTELY BULLETPROOF
-    function correctTimeExtraction(eventData, emailContent) {
-      console.log('\n🚨 NUCLEAR TIME CORRECTION ACTIVATED 🚨');
-      console.log('📧 Email content being analyzed:', emailContent);
-      
-      // AGGRESSIVE regex patterns - catch EVERYTHING
-      const timePatterns = [
-        /(\d{1,2})PM/gi,  // Simple: 3PM
-        /(\d{1,2})AM/gi,  // Simple: 3AM  
-        /(\d{1,2}):(\d{2})PM/gi,  // 3:00PM
-        /(\d{1,2}):(\d{2})AM/gi,  // 3:00AM
-        /(\d{1,2})\s*PM/gi,  // 3 PM
-        /(\d{1,2})\s*AM/gi,  // 3 AM
-        /at\s+(\d{1,2})PM/gi,  // at 3PM
-        /at\s+(\d{1,2})AM/gi,  // at 3AM
-        /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // Standard: 3PM, 3:00PM
-        /(\d{1,2})\s*(?:o'?clock)?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // 3 o'clock PM
-        /at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)/gi,  // at 3PM
-        /(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)\b/gi   // Boundary check
-      ];
-      
-      let foundTime = null;
-      let usedPattern = null;
-      
-      // Try each pattern to find time
-      for (let i = 0; i < timePatterns.length; i++) {
-        const pattern = timePatterns[i];
-        const matches = [...emailContent.matchAll(pattern)];
-        if (matches.length > 0) {
-          foundTime = matches[0];
-          usedPattern = i;
-          console.log(`🎯 FOUND TIME PATTERN #${i}: "${foundTime[0]}" using pattern ${pattern}`);
-          console.log(`🔍 Full match array:`, foundTime);
-          break;
-        }
-      }
-      
-      if (!foundTime) {
-        console.log('❌ NO TIME PATTERN FOUND - trying brute force search');
-        // BRUTE FORCE - look for "3PM" specifically
-        if (emailContent.includes('3PM') || emailContent.includes('3pm')) {
-          console.log('🔥 BRUTE FORCE FOUND 3PM - FORCING CORRECTION');
-          foundTime = ['3PM', '3', null, 'PM'];
-          usedPattern = 'BRUTE_FORCE';
-        }
-      }
-      
-      if (foundTime) {
-        console.log(`🔥 PROCESSING FOUND TIME:`, foundTime);
-        
-        let emailHour, emailMinute, emailIsPM;
-        
-        // Handle different pattern formats
-        if (usedPattern === 'BRUTE_FORCE') {
-          emailHour = 3;
-          emailMinute = 0;
-          emailIsPM = true;
-          console.log('🔥 BRUTE FORCE: Setting 3PM = 15:00');
-        } else if (usedPattern <= 7) {
-          // Simple patterns: 3PM, 3AM, etc.
-          emailHour = parseInt(foundTime[1]);
-          emailMinute = foundTime[2] ? parseInt(foundTime[2]) : 0;
-          const timeStr = foundTime[0].toUpperCase();
-          emailIsPM = timeStr.includes('PM');
-          console.log(`🎯 SIMPLE PATTERN: ${emailHour}${emailIsPM ? 'PM' : 'AM'}`);
-        } else {
-          // Complex patterns with AM/PM in separate group
-          emailHour = parseInt(foundTime[1]);
-          emailMinute = foundTime[2] ? parseInt(foundTime[2]) : 0;
-          const amPmText = foundTime[3].toLowerCase();
-          emailIsPM = amPmText.includes('p');
-          console.log(`🎯 COMPLEX PATTERN: ${emailHour}${emailIsPM ? 'PM' : 'AM'}`);
-        }
-        
-        // Convert to 24-hour format
-        let correctHour = emailHour;
-        if (emailIsPM && emailHour !== 12) {
-          correctHour = emailHour + 12;  // 3PM = 15:00
-          console.log(`🔄 PM CONVERSION: ${emailHour}PM → ${correctHour}:00`);
-        } else if (!emailIsPM && emailHour === 12) {
-          correctHour = 0;  // 12AM = 00:00
-          console.log(`🔄 MIDNIGHT CONVERSION: 12AM → 0:00`);
-        } else if (emailIsPM && emailHour === 12) {
-          correctHour = 12;  // 12PM = 12:00
-          console.log(`🔄 NOON CONVERSION: 12PM → 12:00`);
-        } else {
-          console.log(`🔄 NO CONVERSION NEEDED: ${emailHour}${emailIsPM ? 'PM' : 'AM'} → ${correctHour}:00`);
-        }
-        
-        // Get AI's extracted time
-        const aiDate = new Date(eventData.startDate);
-        const aiHour = aiDate.getHours();
-        const aiMinute = aiDate.getMinutes();
-        
-        console.log(`⏰ EMAIL TIME: ${emailHour}${emailIsPM ? 'PM' : 'AM'} = ${correctHour}:${emailMinute.toString().padStart(2,'0')}`);
-        console.log(`🤖 AI EXTRACTED: ${aiHour}:${aiMinute.toString().padStart(2,'0')}`);
-        console.log(`🔍 COMPARISON: Correct=${correctHour} vs AI=${aiHour}`);
-        
-        // NUCLEAR OPTION - ALWAYS FORCE CORRECTION if times don't match
-        if (aiHour !== correctHour || Math.abs(aiMinute - emailMinute) > 5) {
-          console.log(`🚨 FORCING CORRECTION: AI got ${aiHour}:${aiMinute.toString().padStart(2,'0')}, email says ${correctHour}:${emailMinute.toString().padStart(2,'0')}`);
-          
-          // NUCLEAR FIX - Force correct the time  
-          aiDate.setHours(correctHour, emailMinute, 0, 0);
-          eventData.startDate = aiDate.toISOString();
-          
-          // Force fix the end date (add 1 hour)
-          const endDate = new Date(aiDate);
-          endDate.setHours(correctHour + 1, emailMinute, 0, 0);
-          eventData.endDate = endDate.toISOString();
-          
-          console.log(`💥 NUCLEAR CORRECTION APPLIED!`);
-          console.log(`✅ NEW START DATE: ${eventData.startDate}`);
-          console.log(`✅ NEW END DATE: ${eventData.endDate}`);
-          console.log(`✅ FINAL TIME: ${correctHour}:${emailMinute.toString().padStart(2,'0')} (${correctHour > 12 ? correctHour-12 : correctHour}${correctHour >= 12 ? 'PM' : 'AM'})`);
-          return true; // Correction made
-        } else {
-          console.log(`✅ TIME ALREADY CORRECT - no changes needed`);
-        }
-      }
-      
-      console.log(`❌ NO TIME PATTERN FOUND in: "${emailContent.substring(0, 200)}..."`);
-      return false; // No correction needed
-    }
-    
-    // AGGRESSIVE TIME CORRECTION - FORCE FIX FOR 3PM ISSUE
-    console.log('\n🔥 STARTING TIME CORRECTION DEBUG 🔥');
-    console.log('📧 Original email:', emailContent);
-    console.log('🤖 AI Start Date BEFORE correction:', eventData.startDate);
-    
-    const timeCorrected = correctTimeExtraction(eventData, emailContent);
-    
-    console.log('🤖 AI Start Date AFTER correction:', eventData.startDate);
-    console.log('✅ Time correction applied:', timeCorrected);
-    console.log('🔥 END TIME CORRECTION DEBUG 🔥\n');
-    
-    // Apply year correction (ensure 2025 or later)
-    const yearCorrection = correctEventYear(eventData, emailContent);
-    
-    // Validate the extracted event data
-    const warnings = validateEventData(eventData, emailContent);
-    
-    // Add correction warnings
-    if (timeCorrected) {
-      warnings.unshift('✅ Time was automatically corrected based on email content.');
-    }
-    
-    if (yearCorrection.corrected) {
-      warnings.unshift(...yearCorrection.warnings);
-    }
-    
-    // Debug logging for extractions
-    console.log('DEBUG - Original email excerpt:', emailContent.substring(0, 500));
-    console.log('DEBUG - AI extracted start date:', eventData.startDate);
-    console.log('DEBUG - Time corrected:', timeCorrected);
-    console.log('DEBUG - Year corrected:', yearCorrection.corrected);
-    console.log('DEBUG - Validation warnings:', warnings);
-
-    // Generate ICS file content
-    const icsContent = generateICSContent(eventData);
-
-    // Return the event data and ICS content
-    res.json({
-      success: true,
-      eventData,
-      icsContent,
-      warnings: warnings.length > 0 ? warnings : null,
-      downloadUrl: '/api/download-ics'
-    });
-
-  } catch (error) {
-    console.error('Error extracting event:', error);
-    
-    // Handle specific OpenAI errors
-    if (error.status === 429) {
-      if (error.error?.code === 'rate_limit_exceeded') {
-        return res.status(429).json({ 
-          error: 'OpenAI rate limit exceeded. Please try again in a few moments.',
-          message: 'The request was too large or you have reached the rate limit. Try shortening your email content or wait a moment before trying again.'
-        });
-      }
-    }
-    
-    if (error.status === 400 && error.error?.type === 'invalid_request_error') {
-      return res.status(400).json({ 
-        error: 'Email content too large',
-        message: 'The email content is too long to process. Please try with a shorter email or use plain text mode.'
-      });
-    }
-    
-    // Generic error handling
-    res.status(500).json({ 
-      error: 'Failed to extract calendar event',
-      message: error.message || 'An unexpected error occurred while processing your email.'
-    });
   }
-});
 
-// API endpoint to download ICS file
-app.post('/api/download-ics', (req, res) => {
-  try {
-    const { icsContent } = req.body;
+  /**
+   * Validates relative date interpretations
+   */
+  validateRelativeDates(originalContent, eventData, userCurrentTime) {
+    const warnings = [];
+    const content = originalContent.toLowerCase();
+    const userNow = new Date(userCurrentTime.iso);
+    const eventStart = new Date(eventData.startDate);
     
+    // Check for "tomorrow" keyword
+    if (content.includes('tomorrow')) {
+      const expectedTomorrow = new Date(userNow.getTime() + 24*60*60*1000);
+      const eventDate = new Date(eventStart.toDateString());
+      const tomorrowDate = new Date(expectedTomorrow.toDateString());
+      
+      if (eventDate.getTime() !== tomorrowDate.getTime()) {
+        const expectedDay = expectedTomorrow.toLocaleDateString('en-US', { 
+          timeZone: userCurrentTime.timezone || 'UTC',
+          weekday: 'long', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        warnings.push(`You mentioned "tomorrow" but the extracted date is ${eventStart.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}. Tomorrow should be ${expectedDay}.`);
+      }
+    }
+    
+    // Check for "today" keyword
+    if (content.includes('today')) {
+      const eventDate = new Date(eventStart.toDateString());
+      const todayDate = new Date(userNow.toDateString());
+      
+      if (eventDate.getTime() !== todayDate.getTime()) {
+        warnings.push(`You mentioned "today" but the extracted date doesn't match today's date.`);
+      }
+    }
+    
+    return warnings;
+  }
+
+  /**
+   * Validates and normalizes date strings from AI response
+   */
+  validateAndNormalizeDates(eventData, userCurrentTime = null) {
+    if (!eventData.startDate || !eventData.endDate) {
+      throw new Error('Missing required date information');
+    }
+
+    try {
+      const startDate = new Date(eventData.startDate);
+      const endDate = new Date(eventData.endDate);
+
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        throw new Error('Invalid date format received from AI');
+      }
+
+      if (endDate <= startDate) {
+        throw new Error('End date must be after start date');
+      }
+
+      // Use browser's current time if available, otherwise server time
+      const now = userCurrentTime ? new Date(userCurrentTime.iso) : new Date();
+      const oneMinuteFromNow = new Date(now.getTime() + 60000);
+      
+      if (startDate < oneMinuteFromNow) {
+        console.warn('Event start date is in the past, this might be incorrect');
+      }
+
+      // Normalize to ISO strings
+      eventData.startDate = startDate.toISOString();
+      eventData.endDate = endDate.toISOString();
+
+      return eventData;
+    } catch (error) {
+      throw new Error(`Date validation failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Sends content to OpenAI for parsing.
+   */
+  async parseContentWithAI(content, userTimezone = 'UTC', userCurrentTime = null) {
+    // Use browser's current time if provided, otherwise fall back to server time
+    let now, userLocalTime;
+    
+    if (userCurrentTime) {
+      now = new Date(userCurrentTime.iso);
+      userLocalTime = userCurrentTime.local;
+    } else {
+      now = new Date();
+      userLocalTime = userTimezone !== 'UTC' ? 
+        now.toLocaleString('en-US', { timeZone: userTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) :
+        now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    }
+
+    const systemPrompt = `
+      You are an expert assistant for extracting calendar event details from text.
+      Analyze the text and return a valid JSON object with the event details.
+
+      CRITICAL RULES:
+      1.  **Date Parsing:** 
+          - For absolute dates (e.g., "July 28", "7/28"), use the date as specified
+          - For relative dates, calculate from the user's current date/time:
+            * "today" = current date shown above
+            * "tomorrow" = exactly 1 day from current date
+            * "day after tomorrow" = exactly 2 days from current date
+            * "next Monday" = the next occurrence of Monday from current date
+          - If the year is missing, use current year unless the date has already passed, then use next year
+      2.  **Time:** Convert all times to a 24-hour format.
+          - 1PM=13:00, 2PM=14:00, 3PM=15:00, etc.
+          - 12AM (midnight) = 00:00. 12PM (noon) = 12:00.
+      3.  **Timezone:** If a timezone is mentioned in the text, preserve it and include it in the timezone field. If no timezone is specified, assume the user's timezone (${userTimezone}). Always format dates as ISO 8601 strings with timezone info when possible.
+      4.  **Location Intelligence:** 
+          - Extract venue names, business names, or place names mentioned in the text
+          - If you recognize well-known places (Google HQ, Apple Park, Harvard University, Central Park, etc.), provide their common address
+          - Parse any address components mentioned (street, city, state, zip)
+          - For conference rooms or internal locations, include building/company context
+          - Mark isWellKnownPlace as true for famous landmarks, major companies, universities, etc.
+      5.  **End Time:** If no end time or duration is specified, create an event that is exactly 1 hour long.
+      6.  **No Event:** If no event is found, return hasEvent: false.
+      7.  **Current Date Context:** 
+         - UTC: ${now.toISOString().split('T')[0]} (${now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })})
+         - User's local time (${userTimezone}): ${userLocalTime}
+         
+      **CRITICAL RELATIVE DATE RULES:**
+         - TODAY = ${userLocalTime.split(',')[0]} (${now.toLocaleDateString('en-US', { timeZone: userTimezone, month: 'numeric', day: 'numeric', year: 'numeric' })})
+         - TOMORROW = ${new Date(now.getTime() + 24*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+         - DAY AFTER TOMORROW = ${new Date(now.getTime() + 48*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+         
+      **IMPORTANT:** When you see "tomorrow" in the text, it MUST be ${new Date(now.getTime() + 24*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, NOT any other day!
+
+      **Examples:**
+      Location:
+      - "Meeting at Google HQ" → name: "Google Headquarters", address: "1600 Amphitheatre Parkway, Mountain View, CA", isWellKnownPlace: true
+      - "Conference Room B, Building 2" → name: "Conference Room B, Building 2", address: null, isWellKnownPlace: false
+      - "Starbucks on 5th Avenue" → name: "Starbucks", city: "New York", isWellKnownPlace: false
+      - "Central Park" → name: "Central Park", address: "New York, NY 10024", isWellKnownPlace: true
+      
+      Relative Dates (CRITICAL):
+      - If today is Saturday July 26, 2025 and text says "tomorrow at 2 PM" → startDate should be Sunday July 27, 2025 at 2 PM
+      - If today is Saturday July 26, 2025 and text says "meeting Saj tomorrow" → startDate should be Sunday July 27, 2025
+      - NEVER interpret "tomorrow" as anything other than exactly 1 day from the current date
+      
+      Return ONLY the JSON object, nothing else.
+
+      JSON FORMAT:
+      {
+        "title": "string",
+        "startDate": "YYYY-MM-DDTHH:MM:SS.000Z (ISO 8601 with timezone)",
+        "endDate": "YYYY-MM-DDTHH:MM:SS.000Z (ISO 8601 with timezone)",
+        "location": "string | null",
+        "locationDetails": {
+          "name": "string | null (venue/business name)",
+          "address": "string | null (full address if mentioned or can be inferred)",
+          "city": "string | null",
+          "state": "string | null",
+          "country": "string | null",
+          "isWellKnownPlace": "boolean (true for famous landmarks, major companies, universities, etc.)"
+        },
+        "description": "string | null",
+        "hasEvent": boolean,
+        "timezone": "string | null (detected or assumed timezone like '${userTimezone}', 'EST', 'PST', etc.)"
+      }
+    `;
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+        max_tokens: 1000,
+      });
+
+      const responseJson = completion.choices[0].message.content;
+      const parsedData = JSON.parse(responseJson);
+      
+      // Validate and normalize dates if event was found
+      if (parsedData.hasEvent) {
+        const validatedData = this.validateAndNormalizeDates(parsedData, userCurrentTime);
+        
+        // Additional validation for relative date accuracy
+        if (userCurrentTime) {
+          const warnings = this.validateRelativeDates(content, validatedData, userCurrentTime);
+          if (warnings.length > 0) {
+            validatedData.warnings = warnings;
+          }
+        }
+        
+        return validatedData;
+      }
+      
+      return parsedData;
+
+    } catch (error) {
+      console.error('OpenAI API call failed:', error);
+      throw new Error('AI parsing failed.');
+    }
+  }
+
+  /**
+   * Generates the content for a .ics file.
+   */
+  generateIcsContent(eventData) {
+    const formatDate = (dateStr) => {
+      const date = new Date(dateStr);
+      // Always convert to UTC for ICS files for consistency
+      return date.toISOString().replace(/[-:.]/g, '').slice(0, -4) + 'Z';
+    };
+
+    const { startDate, endDate, title, description, location, locationDetails, timezone } = eventData;
+    
+    // Build comprehensive location string for ICS
+    let icsLocation = location || '';
+    if (locationDetails) {
+      const locationParts = [];
+      if (locationDetails.name) locationParts.push(locationDetails.name);
+      if (locationDetails.address) {
+        locationParts.push(locationDetails.address);
+      } else {
+        // Build address from components
+        const addressParts = [];
+        if (locationDetails.city) addressParts.push(locationDetails.city);
+        if (locationDetails.state) addressParts.push(locationDetails.state);
+        if (locationDetails.country) addressParts.push(locationDetails.country);
+        if (addressParts.length > 0) {
+          locationParts.push(addressParts.join(', '));
+        }
+      }
+      icsLocation = locationParts.join(', ') || icsLocation;
+    }
+    const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, -4) + 'Z';
+
+    const icsParts = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//AiCal//Event Extractor//EN',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${uuidv4()}@aical.com`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${formatDate(startDate)}`,
+      `DTEND:${formatDate(endDate)}`,
+      `SUMMARY:${title || 'No Title'}`,
+      `DESCRIPTION:${(description || '').replace(/\n/g, '\\n')}`,
+      `LOCATION:${icsLocation}`,
+      'STATUS:CONFIRMED'
+    ];
+
+    // Add timezone information as a comment if available
+    if (timezone) {
+      icsParts.splice(-1, 0, `X-ORIGINAL-TIMEZONE:${timezone}`);
+    }
+
+    icsParts.push('END:VEVENT', 'END:VCALENDAR');
+
+    return icsParts.join('\r\n');
+  }
+
+  /**
+   * Handles the request to download the .ics file.
+   */
+  handleIcsDownload(req, res) {
+    const { icsContent } = req.body;
     if (!icsContent) {
-      return res.status(400).json({ error: 'No ICS content provided' });
+      return res.status(400).json({ error: 'No ICS content provided.' });
     }
 
     res.setHeader('Content-Type', 'text/calendar');
     res.setHeader('Content-Disposition', 'attachment; filename="event.ics"');
     res.send(icsContent);
-
-  } catch (error) {
-    console.error('Error downloading ICS:', error);
-    res.status(500).json({ error: 'Failed to download ICS file' });
   }
-});
+  
+  /**
+   * Starts the Express server.
+   */
+  start() {
+    const isProduction = process.env.NODE_ENV === 'production';
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
+    // In development, try to use HTTPS with self-signed certs
+    if (!isProduction) {
+      try {
+        const privateKey = fs.readFileSync('./certs/key.pem', 'utf8');
+        const certificate = fs.readFileSync('./certs/cert.pem', 'utf8');
+        const httpsServer = https.createServer({ key: privateKey, cert: certificate }, this.app);
+        
+        httpsServer.listen(this.port, () => {
+          console.log(`🔒 HTTPS Server running on https://localhost:${this.port}`);
+        });
+        return;
 
-// Error handling middleware
-app.use((error, req, res, next) => {
-  // Handle multer errors
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ 
-        error: 'File too large',
-        message: 'File size must be less than 10MB. Please try a smaller file.'
-      });
+      } catch (err) {
+        console.log('⚠️ Could not find SSL certs, falling back to HTTP. For HTTPS, run: npm run generate-certs');
+      }
     }
-    return res.status(400).json({ 
-      error: 'File upload error',
-      message: error.message 
-    });
-  }
-  
-  // Handle file filter errors
-  if (error.message.includes('Invalid file type')) {
-    return res.status(400).json({ 
-      error: 'Invalid file type',
-      message: error.message 
-    });
-  }
-  
-  console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not found' });
-});
-
-// Server setup
-function startServer() {
-  // Check if we're on Render or other cloud platforms
-  const isCloudPlatform = process.env.RENDER || process.env.HEROKU || process.env.VERCEL || process.env.NODE_ENV === 'production';
-  
-  if (isCloudPlatform) {
-    // On cloud platforms, use HTTP as they handle SSL termination
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'production'}`);
-      console.log(`✅ Ready to accept requests`);
+    // In production or if HTTPS setup fails, use HTTP
+    this.app.listen(this.port, () => {
+      console.log(`🚀 HTTP Server running on http://localhost:${this.port}`);
     });
-  } else {
-    // For local development, try HTTPS first, fallback to HTTP
-    try {
-      const privateKey = fs.readFileSync('./certs/key.pem', 'utf8');
-      const certificate = fs.readFileSync('./certs/cert.pem', 'utf8');
-      
-      const credentials = { key: privateKey, cert: certificate };
-      const httpsServer = https.createServer(credentials, app);
-      
-      httpsServer.listen(PORT, '0.0.0.0', () => {
-        console.log(`🔒 HTTPS Server running on https://localhost:${PORT}`);
-        console.log(`📱 Network access: https://192.168.7.239:${PORT}`);
-        console.log('🛡️  Note: Using self-signed certificate for development');
-      });
-    } catch (error) {
-      console.log('⚠️  SSL certificates not found. Run "npm run generate-certs" first');
-      console.log('🔄 Falling back to HTTP for development...');
-      app.listen(PORT, '0.0.0.0', () => {
-        console.log(`🌐 HTTP Server running on http://localhost:${PORT}`);
-        console.log(`📱 Network access: http://192.168.7.239:${PORT}`);
-        console.log('⚠️  WARNING: Running in HTTP mode - not secure for production!');
-      });
-    }
   }
 }
 
-startServer(); 
+// Create and start the service
+const calendarService = new CalendarService();
+calendarService.start(); 
