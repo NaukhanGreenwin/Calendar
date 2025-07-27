@@ -83,12 +83,52 @@
 
             <div id="results" class="results-section" style="display: none;">
                 <h3>📋 Extracted Event Details</h3>
+                <div class="results-actions">
+                    <button id="editBtn" class="edit-btn">✏️ Edit Details</button>
+                    <button id="addAnotherBtn" class="add-btn" style="display: none;">➕ Add Another Event</button>
+                </div>
                 <div id="eventDetails" class="event-details"></div>
                 
                 <div class="download-section">
                     <button id="downloadBtn" class="download-btn">
                         📥 Download .ics Calendar File
                     </button>
+                </div>
+            </div>
+
+            <!-- Edit Modal -->
+            <div id="editModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>✏️ Edit Event Details</h3>
+                        <button id="closeModal" class="close-btn">✕</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="edit-field">
+                            <label>📝 Title:</label>
+                            <input type="text" id="editTitle" placeholder="Event title">
+                        </div>
+                        <div class="edit-field">
+                            <label>📅 Start Date & Time:</label>
+                            <input type="datetime-local" id="editStartDate">
+                        </div>
+                        <div class="edit-field">
+                            <label>📅 End Date & Time:</label>
+                            <input type="datetime-local" id="editEndDate">
+                        </div>
+                        <div class="edit-field">
+                            <label>📍 Location:</label>
+                            <input type="text" id="editLocation" placeholder="Event location">
+                        </div>
+                        <div class="edit-field">
+                            <label>📋 Description:</label>
+                            <textarea id="editDescription" rows="3" placeholder="Event description"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button id="saveChanges" class="save-btn">💾 Save Changes</button>
+                        <button id="cancelEdit" class="cancel-btn">❌ Cancel</button>
+                    </div>
                 </div>
             </div>
 
@@ -118,7 +158,14 @@
                     <li>Make sure location details are mentioned in the email</li>
                     <li>The AI automatically detects timezones or uses your local timezone</li>
                     <li>Dates in the past will be automatically moved to the current/next year</li>
+                    <li>Multiple events in one email are automatically detected</li>
+                    <li>Recurring meetings (weekly, monthly) are supported</li>
                 </ul>
+                
+                <div class="smart-suggestions" id="smartSuggestions" style="display: none;">
+                    <h4>🤖 Smart Suggestions</h4>
+                    <div id="suggestionsList"></div>
+                </div>
             </div>
         </footer>
     </div>

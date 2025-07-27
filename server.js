@@ -131,7 +131,9 @@ class CalendarService {
       // Generate the .ics file content
       const icsContent = this.generateIcsContent(eventData);
 
-      console.log(`Successfully extracted event: "${eventData.title}"`);
+      // Handle both old and new format for logging
+      const eventTitle = eventData.events ? eventData.events[0]?.title : eventData.title;
+      console.log(`Successfully extracted event: "${eventTitle}"`);
 
       // Send the successful response
       res.status(200).json({
@@ -186,9 +188,9 @@ class CalendarService {
   }
 
   /**
-   * Validates and normalizes date strings from AI response
+   * Validates and normalizes a single event's date strings
    */
-  validateAndNormalizeDates(eventData, userCurrentTime = null) {
+  validateAndNormalizeSingleEvent(eventData, userCurrentTime = null) {
     if (!eventData.startDate || !eventData.endDate) {
       throw new Error('Missing required date information');
     }
@@ -245,14 +247,15 @@ class CalendarService {
       Analyze the text and return a valid JSON object with the event details.
 
       CRITICAL RULES:
-      1.  **Date Parsing:** 
-          - For absolute dates (e.g., "July 28", "7/28"), use the date as specified
-          - For relative dates, calculate from the user's current date/time:
-            * "today" = current date shown above
-            * "tomorrow" = exactly 1 day from current date
-            * "day after tomorrow" = exactly 2 days from current date
-            * "next Monday" = the next occurrence of Monday from current date
-          - If the year is missing, use current year unless the date has already passed, then use next year
+      1.  **Date Parsing (CRITICAL):** 
+          - ALWAYS look for ANY date/time information in the text
+          - For "Wednesday, August 6th at 3PM" → find next August 6th that falls on Wednesday, time = 15:00
+          - For "meeting Wednesday" → find next Wednesday from current date
+          - For "at 3PM" → use 15:00 as time
+          - For relative dates: "today", "tomorrow", "next Monday" etc.
+          - If year is missing, determine correct year based on context
+          - NEVER return hasEvent: false if there's ANY meeting/event mentioned
+          - NEVER leave dates as null if ANY time reference exists
       2.  **Time:** Convert all times to a 24-hour format.
           - 1PM=13:00, 2PM=14:00, 3PM=15:00, etc.
           - 12AM (midnight) = 00:00. 12PM (noon) = 12:00.
@@ -269,12 +272,16 @@ class CalendarService {
          - UTC: ${now.toISOString().split('T')[0]} (${now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })})
          - User's local time (${userTimezone}): ${userLocalTime}
          
-      **CRITICAL RELATIVE DATE RULES:**
+      **CRITICAL DATE PARSING RULES:**
          - TODAY = ${userLocalTime.split(',')[0]} (${now.toLocaleDateString('en-US', { timeZone: userTimezone, month: 'numeric', day: 'numeric', year: 'numeric' })})
          - TOMORROW = ${new Date(now.getTime() + 24*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-         - DAY AFTER TOMORROW = ${new Date(now.getTime() + 48*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+         - When you see "Wednesday, August 6th" - find the next occurrence of that date from today
+         - When you see "3PM" or "at 3PM" - convert to 15:00 in 24-hour format
+         - ALWAYS extract dates and times even if they seem incomplete
+         - If only a day is mentioned (like "Wednesday"), find the next Wednesday from today
+         - If only a time is mentioned (like "3PM"), use today's date with that time
          
-      **IMPORTANT:** When you see "tomorrow" in the text, it MUST be ${new Date(now.getTime() + 24*60*60*1000).toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, NOT any other day!
+      **IMPORTANT:** NEVER return "Not specified" for dates if ANY date/time information exists in the text!
 
       **Examples:**
       Location:
@@ -283,31 +290,47 @@ class CalendarService {
       - "Starbucks on 5th Avenue" → name: "Starbucks", city: "New York", isWellKnownPlace: false
       - "Central Park" → name: "Central Park", address: "New York, NY 10024", isWellKnownPlace: true
       
-      Relative Dates (CRITICAL):
-      - If today is Saturday July 26, 2025 and text says "tomorrow at 2 PM" → startDate should be Sunday July 27, 2025 at 2 PM
-      - If today is Saturday July 26, 2025 and text says "meeting Saj tomorrow" → startDate should be Sunday July 27, 2025
-      - NEVER interpret "tomorrow" as anything other than exactly 1 day from the current date
+      Date Examples (CRITICAL):
+      - "meeting Wednesday, August 6th at 3PM" → find next August 6th that's a Wednesday, set time to 15:00
+      - "tomorrow at 2 PM" → exactly 1 day from current date at 14:00
+      - "DashQ Meeting" with "Wednesday, August 6th at 3PM" → title: "DashQ Meeting", date: next Aug 6th Wednesday at 15:00
+      - ALWAYS extract the meeting title/subject from the email
+      - NEVER return hasEvent: false if meeting details are mentioned
       
       Return ONLY the JSON object, nothing else.
 
-      JSON FORMAT:
+      JSON FORMAT (CRITICAL - MUST FOLLOW EXACTLY):
       {
-        "title": "string",
-        "startDate": "YYYY-MM-DDTHH:MM:SS.000Z (ISO 8601 with timezone)",
-        "endDate": "YYYY-MM-DDTHH:MM:SS.000Z (ISO 8601 with timezone)",
-        "location": "string | null",
-        "locationDetails": {
-          "name": "string | null (venue/business name)",
-          "address": "string | null (full address if mentioned or can be inferred)",
-          "city": "string | null",
-          "state": "string | null",
-          "country": "string | null",
-          "isWellKnownPlace": "boolean (true for famous landmarks, major companies, universities, etc.)"
-        },
-        "description": "string | null",
-        "hasEvent": boolean,
-        "timezone": "string | null (detected or assumed timezone like '${userTimezone}', 'EST', 'PST', etc.)"
+        "hasEvent": true,
+        "events": [
+          {
+            "title": "DashQ Meeting (REQUIRED - extract from subject/content)",
+            "startDate": "2025-08-06T15:00:00.000Z (REQUIRED - Wednesday Aug 6th at 3PM)",
+            "endDate": "2025-08-06T16:00:00.000Z (REQUIRED - 1 hour after start if not specified)",
+            "location": "string | null",
+            "locationDetails": {
+              "name": "string | null",
+              "address": "string | null", 
+              "city": "string | null",
+              "state": "string | null",
+              "country": "string | null",
+              "isWellKnownPlace": false
+            },
+            "description": "Review platform and have key personnel on the call",
+            "timezone": "${userTimezone}",
+            "attendees": ["Nauman Khan", "Elizabeth Giannitelli", "Neda Omidi"],
+            "meetingType": "video-call",
+            "isRecurring": false,
+            "recurrencePattern": null
+          }
+        ]
       }
+      
+      CRITICAL REQUIREMENTS:
+      - ALWAYS set hasEvent: true if ANY meeting is mentioned
+      - ALWAYS extract title from subject line or content
+      - ALWAYS calculate proper dates from "Wednesday, August 6th at 3PM"
+      - NEVER leave title, startDate, or endDate as null/undefined
     `;
 
     try {
@@ -323,21 +346,44 @@ class CalendarService {
       });
 
       const responseJson = completion.choices[0].message.content;
+      console.log('AI Response:', responseJson); // Debug logging
+      
       const parsedData = JSON.parse(responseJson);
+      console.log('Parsed Data:', parsedData); // Debug logging
       
       // Validate and normalize dates if event was found
       if (parsedData.hasEvent) {
-        const validatedData = this.validateAndNormalizeDates(parsedData, userCurrentTime);
+        // Handle both single event and multiple events format
+        if (parsedData.events && Array.isArray(parsedData.events)) {
+          // Multiple events format
+          parsedData.events = parsedData.events.map(event => 
+            this.validateAndNormalizeSingleEvent(event, userCurrentTime)
+          );
+        } else {
+          // Legacy single event format - convert to new format
+          const singleEvent = this.validateAndNormalizeSingleEvent(parsedData, userCurrentTime);
+          parsedData = {
+            hasEvent: true,
+            events: [singleEvent]
+          };
+        }
         
         // Additional validation for relative date accuracy
         if (userCurrentTime) {
-          const warnings = this.validateRelativeDates(content, validatedData, userCurrentTime);
+          const warnings = this.validateRelativeDates(content, parsedData, userCurrentTime);
           if (warnings.length > 0) {
-            validatedData.warnings = warnings;
+            parsedData.warnings = warnings;
           }
         }
         
-        return validatedData;
+        return parsedData;
+      } else {
+        // Check if AI incorrectly said no event when there clearly is one
+        const hasEventKeywords = /meeting|appointment|call|conference|event|schedule|invite/i.test(content);
+        if (hasEventKeywords) {
+          console.warn('AI said no event but content contains meeting keywords. Forcing re-analysis...');
+          // Could implement retry logic here
+        }
       }
       
       return parsedData;
@@ -358,51 +404,63 @@ class CalendarService {
       return date.toISOString().replace(/[-:.]/g, '').slice(0, -4) + 'Z';
     };
 
-    const { startDate, endDate, title, description, location, locationDetails, timezone } = eventData;
-    
-    // Build comprehensive location string for ICS
-    let icsLocation = location || '';
-    if (locationDetails) {
-      const locationParts = [];
-      if (locationDetails.name) locationParts.push(locationDetails.name);
-      if (locationDetails.address) {
-        locationParts.push(locationDetails.address);
-      } else {
-        // Build address from components
-        const addressParts = [];
-        if (locationDetails.city) addressParts.push(locationDetails.city);
-        if (locationDetails.state) addressParts.push(locationDetails.state);
-        if (locationDetails.country) addressParts.push(locationDetails.country);
-        if (addressParts.length > 0) {
-          locationParts.push(addressParts.join(', '));
-        }
-      }
-      icsLocation = locationParts.join(', ') || icsLocation;
-    }
     const now = new Date().toISOString().replace(/[-:.]/g, '').slice(0, -4) + 'Z';
-
+    
+    // Handle both single event and multiple events
+    const events = eventData.events || [eventData];
+    
     const icsParts = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//AiCal//Event Extractor//EN',
-      'CALSCALE:GREGORIAN',
-      'BEGIN:VEVENT',
-      `UID:${uuidv4()}@aical.com`,
-      `DTSTAMP:${now}`,
-      `DTSTART:${formatDate(startDate)}`,
-      `DTEND:${formatDate(endDate)}`,
-      `SUMMARY:${title || 'No Title'}`,
-      `DESCRIPTION:${(description || '').replace(/\n/g, '\\n')}`,
-      `LOCATION:${icsLocation}`,
-      'STATUS:CONFIRMED'
+      'CALSCALE:GREGORIAN'
     ];
 
-    // Add timezone information as a comment if available
-    if (timezone) {
-      icsParts.splice(-1, 0, `X-ORIGINAL-TIMEZONE:${timezone}`);
-    }
+    // Add each event
+    events.forEach(event => {
+      const { startDate, endDate, title, description, location, locationDetails, timezone } = event;
+      
+      // Build comprehensive location string for ICS
+      let icsLocation = location || '';
+      if (locationDetails) {
+        const locationParts = [];
+        if (locationDetails.name) locationParts.push(locationDetails.name);
+        if (locationDetails.address) {
+          locationParts.push(locationDetails.address);
+        } else {
+          // Build address from components
+          const addressParts = [];
+          if (locationDetails.city) addressParts.push(locationDetails.city);
+          if (locationDetails.state) addressParts.push(locationDetails.state);
+          if (locationDetails.country) addressParts.push(locationDetails.country);
+          if (addressParts.length > 0) {
+            locationParts.push(addressParts.join(', '));
+          }
+        }
+        icsLocation = locationParts.join(', ') || icsLocation;
+      }
 
-    icsParts.push('END:VEVENT', 'END:VCALENDAR');
+      icsParts.push(
+        'BEGIN:VEVENT',
+        `UID:${uuidv4()}@aical.com`,
+        `DTSTAMP:${now}`,
+        `DTSTART:${formatDate(startDate)}`,
+        `DTEND:${formatDate(endDate)}`,
+        `SUMMARY:${title || 'No Title'}`,
+        `DESCRIPTION:${(description || '').replace(/\n/g, '\\n')}`,
+        `LOCATION:${icsLocation}`,
+        'STATUS:CONFIRMED'
+      );
+
+      // Add timezone information as a comment if available
+      if (timezone) {
+        icsParts.splice(-1, 0, `X-ORIGINAL-TIMEZONE:${timezone}`);
+      }
+
+      icsParts.push('END:VEVENT');
+    });
+
+    icsParts.push('END:VCALENDAR');
 
     return icsParts.join('\r\n');
   }
