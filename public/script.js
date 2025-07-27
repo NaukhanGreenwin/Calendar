@@ -512,6 +512,23 @@ function displayEventDetails(eventData, warnings) {
         { label: 'End Date', value: formatDate(eventData.endDate), icon: '📅' }
     ];
 
+    // Add attendees if available
+    if (eventData.attendees && eventData.attendees.length > 0) {
+        const attendeesList = eventData.attendees.map(attendee => {
+            if (typeof attendee === 'object' && attendee.email) {
+                return `${attendee.name || attendee.email} <${attendee.email}>`;
+            }
+            return attendee;
+        }).join(', ');
+        
+        fields.push({ 
+            label: 'Attendees', 
+            value: attendeesList, 
+            icon: '👥',
+            isAttendees: true
+        });
+    }
+
     // Add enhanced location information
     if (eventData.locationDetails && (eventData.locationDetails.name || eventData.locationDetails.address)) {
         const locationParts = [];
@@ -577,6 +594,30 @@ function displayEventDetails(eventData, warnings) {
                         <span><a href="${escapeHtml(field.value)}" target="_blank" rel="noopener noreferrer" class="meeting-link">${escapeHtml(field.value)}</a></span>
                     `;
                 }
+            } else if (field.isAttendees) {
+                // Handle attendees display with email links
+                const attendees = eventData.attendees || [];
+                let attendeesHtml = `<strong>${field.icon} ${field.label}:</strong><div class="attendees-list">`;
+                
+                attendees.forEach((attendee, index) => {
+                    if (typeof attendee === 'object' && attendee.email) {
+                        attendeesHtml += `
+                            <div class="attendee-item">
+                                <span class="attendee-name">${escapeHtml(attendee.name || attendee.email)}</span>
+                                <a href="mailto:${escapeHtml(attendee.email)}" class="attendee-email">${escapeHtml(attendee.email)}</a>
+                            </div>
+                        `;
+                    } else {
+                        attendeesHtml += `<div class="attendee-item"><span class="attendee-name">${escapeHtml(attendee)}</span></div>`;
+                    }
+                });
+                
+                attendeesHtml += `
+                    <div class="attendees-note">
+                        💡 Attendees will receive calendar invites when you import this .ics file
+                    </div>
+                </div>`;
+                fieldDiv.innerHTML = attendeesHtml;
             } else if (field.isLocation && field.locationDetails) {
                 // Handle enhanced location display
                 let locationHtml = `<strong>${field.icon} ${field.label}:</strong><div class="location-details">`;
@@ -783,6 +824,14 @@ function openEditModal() {
     document.getElementById('editTitle').value = event.title || '';
     document.getElementById('editLocation').value = event.location || '';
     document.getElementById('editDescription').value = event.description || '';
+    
+    // Handle attendees
+    if (event.attendees && event.attendees.length > 0) {
+        const attendeeEmails = event.attendees.map(attendee => 
+            typeof attendee === 'object' ? attendee.email : attendee
+        ).filter(Boolean).join(', ');
+        document.getElementById('editAttendees').value = attendeeEmails;
+    }
 
     // Convert dates to local datetime format for input
     if (event.startDate) {
@@ -814,12 +863,23 @@ function formatDateForInput(date) {
 }
 
 function saveEventChanges() {
+    // Parse attendees from textarea
+    const attendeesText = document.getElementById('editAttendees').value;
+    const attendees = attendeesText.split(',').map(email => {
+        const trimmedEmail = email.trim();
+        if (trimmedEmail && trimmedEmail.includes('@')) {
+            return { email: trimmedEmail, name: trimmedEmail.split('@')[0] };
+        }
+        return null;
+    }).filter(Boolean);
+
     const updatedEvent = {
         title: document.getElementById('editTitle').value,
         location: document.getElementById('editLocation').value,
         description: document.getElementById('editDescription').value,
         startDate: new Date(document.getElementById('editStartDate').value).toISOString(),
-        endDate: new Date(document.getElementById('editEndDate').value).toISOString()
+        endDate: new Date(document.getElementById('editEndDate').value).toISOString(),
+        attendees: attendees
     };
 
     // Update current event data

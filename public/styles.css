@@ -913,3 +913,76 @@ al Styles */
         flex-direction: column;
     }
 }
+/* Attendees Styles */
+.attendees-list {
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 3px solid #007bff;
+    width: 100%;
+}
+
+.attendee-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e9ecef;
+    gap: 12px;
+}
+
+.attendee-item:last-of-type {
+    border-bottom: none;
+}
+
+.attendee-name {
+    font-weight: 500;
+    color: #2c3e50;
+    flex: 1;
+}
+
+.attendee-email {
+    color: #007bff;
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 4px 8px;
+    background: #e3f2fd;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.attendee-email:hover {
+    background: #bbdefb;
+    text-decoration: underline;
+}
+
+.attendees-note {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #e8f4fd;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #0056b3;
+    border-left: 3px solid #007bff;
+}
+
+/* Responsive attendees */
+@media (max-width: 480px) {
+    .attendee-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .attendee-email {
+        align-self: flex-end;
+    }
+}/* 
+Edit modal field help */
+.field-help {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    color: #6c757d;
+    font-style: italic;
+}

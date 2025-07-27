@@ -260,7 +260,13 @@ class CalendarService {
           - 1PM=13:00, 2PM=14:00, 3PM=15:00, etc.
           - 12AM (midnight) = 00:00. 12PM (noon) = 12:00.
       3.  **Timezone:** If a timezone is mentioned in the text, preserve it and include it in the timezone field. If no timezone is specified, assume the user's timezone (${userTimezone}). Always format dates as ISO 8601 strings with timezone info when possible.
-      4.  **Location Intelligence:** 
+      4.  **Attendee Extraction:**
+          - Extract ALL email addresses mentioned in the email (To:, CC:, From:, in content)
+          - Extract names associated with email addresses
+          - Look for phrases like "invited:", "attendees:", "participants:"
+          - Include the sender and recipients as attendees
+          - Format as: [{"name": "John Doe", "email": "john@company.com"}, ...]
+      5.  **Location Intelligence:** 
           - Extract venue names, business names, or place names mentioned in the text
           - If you recognize well-known places (Google HQ, Apple Park, Harvard University, Central Park, etc.), provide their common address
           - Parse any address components mentioned (street, city, state, zip)
@@ -318,7 +324,11 @@ class CalendarService {
             },
             "description": "Review platform and have key personnel on the call",
             "timezone": "${userTimezone}",
-            "attendees": ["Nauman Khan", "Elizabeth Giannitelli", "Neda Omidi"],
+            "attendees": [
+              {"name": "Nauman Khan", "email": "NKhan@greenwin.ca"},
+              {"name": "Elizabeth Giannitelli", "email": "EGiannitelli@greenwin.ca"},
+              {"name": "Neda Omidi", "email": "nomidi@greenwin.ca"}
+            ],
             "meetingType": "video-call",
             "isRecurring": false,
             "recurrencePattern": null
@@ -418,7 +428,7 @@ class CalendarService {
 
     // Add each event
     events.forEach(event => {
-      const { startDate, endDate, title, description, location, locationDetails, timezone } = event;
+      const { startDate, endDate, title, description, location, locationDetails, timezone, attendees } = event;
       
       // Build comprehensive location string for ICS
       let icsLocation = location || '';
@@ -451,6 +461,23 @@ class CalendarService {
         `LOCATION:${icsLocation}`,
         'STATUS:CONFIRMED'
       );
+
+      // Add organizer (first attendee or default)
+      if (attendees && attendees.length > 0 && attendees[0].email) {
+        const organizer = attendees[0];
+        const organizerName = organizer.name ? organizer.name : organizer.email;
+        icsParts.push(`ORGANIZER;CN=${organizerName}:mailto:${organizer.email}`);
+      }
+
+      // Add attendees if available
+      if (attendees && Array.isArray(attendees)) {
+        attendees.forEach(attendee => {
+          if (attendee.email) {
+            const attendeeName = attendee.name ? attendee.name : attendee.email;
+            icsParts.push(`ATTENDEE;CN=${attendeeName};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${attendee.email}`);
+          }
+        });
+      }
 
       // Add timezone information as a comment if available
       if (timezone) {
