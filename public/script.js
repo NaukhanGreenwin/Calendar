@@ -314,6 +314,31 @@ document.addEventListener('DOMContentLoaded', function () {
     updateCharacterCount();
     richContentDiv.focus();
 
+    // Show iOS-specific button if on iPhone/iPad
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (isIOS) {
+        const iosBtn = document.getElementById('iosCalendarBtn');
+        const regularBtn = document.getElementById('downloadBtn');
+        if (iosBtn && regularBtn) {
+            iosBtn.style.display = 'inline-block';
+            regularBtn.textContent = '💾 Download .ics File';
+            
+            // Add iOS-specific event listener
+            iosBtn.addEventListener('click', function() {
+                if (!currentIcsContent) {
+                    showError('No calendar event data available.');
+                    return;
+                }
+                
+                // Create data URL and open
+                const dataUrl = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(currentIcsContent);
+                window.location.href = dataUrl;
+                
+                showSuccess('📱 Opening in Calendar app... Tap "Add" to save the event!');
+            });
+        }
+    }
+
     // Display user's timezone and current time
     const timezoneDisplay = document.getElementById('timezoneDisplay');
     if (timezoneDisplay) {
@@ -430,27 +455,36 @@ downloadBtn.addEventListener('click', function () {
     }
 
     try {
-        // Create blob and download
-        const blob = new Blob([currentIcsContent], { type: 'text/calendar' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'event.ics';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        // Show success feedback
-        const originalText = downloadBtn.textContent;
-        downloadBtn.textContent = '✅ Downloaded!';
-        downloadBtn.style.backgroundColor = '#218838';
-
-        setTimeout(() => {
-            downloadBtn.textContent = originalText;
-            downloadBtn.style.backgroundColor = '#28a745';
-        }, 2000);
-
+        // Detect if we're on iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        
+        if (isIOS) {
+            // For iOS, create a data URL and open it
+            const dataUrl = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(currentIcsContent);
+            const newWindow = window.open(dataUrl, '_blank');
+            
+            // Show iOS-specific instructions
+            showSuccess('📱 Tap "Add to Calendar" in the popup to save to your iPhone Calendar!');
+            
+            // Fallback: if popup blocked, try direct navigation
+            if (!newWindow) {
+                window.location.href = dataUrl;
+            }
+        } else {
+            // For desktop/Android, use blob download
+            const blob = new Blob([currentIcsContent], { type: 'text/calendar' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'event.ics';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showSuccess('✅ Calendar file downloaded!');
+        }
+        
     } catch (error) {
         console.error('Download error:', error);
         showError('Failed to download the calendar file. Please try again.');
