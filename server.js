@@ -476,6 +476,30 @@ class CalendarService {
       
       console.log('Final ICS location:', icsLocation); // Debug logging
 
+      // Properly escape ICS location field
+      const escapedLocation = icsLocation
+        .replace(/\\/g, '\\\\')  // Escape backslashes
+        .replace(/;/g, '\\;')    // Escape semicolons
+        .replace(/,/g, '\\,')    // Escape commas
+        .replace(/\n/g, '\\n')   // Escape newlines
+        .replace(/\r/g, '\\r');  // Escape carriage returns
+
+      console.log('Escaped ICS location:', escapedLocation); // Debug logging
+
+      // Function to fold long lines according to ICS specification
+      const foldLine = (line) => {
+        if (line.length <= 75) return line;
+        let folded = line.substring(0, 75);
+        let remaining = line.substring(75);
+        while (remaining.length > 0) {
+          folded += '\r\n ' + remaining.substring(0, 74);
+          remaining = remaining.substring(74);
+        }
+        return folded;
+      };
+
+      const locationLine = foldLine(`LOCATION:${escapedLocation}`);
+
       icsParts.push(
         'BEGIN:VEVENT',
         `UID:${uuidv4()}@aical.com`,
@@ -484,7 +508,7 @@ class CalendarService {
         `DTEND:${formatDate(endDate)}`,
         `SUMMARY:${title || 'No Title'}`,
         `DESCRIPTION:${(description || '').replace(/\n/g, '\\n')}`,
-        `LOCATION:${icsLocation}`,
+        locationLine,
         'STATUS:CONFIRMED',
         'SEQUENCE:0',
         'TRANSP:OPAQUE'
@@ -548,8 +572,10 @@ class CalendarService {
         const certificate = fs.readFileSync('./certs/cert.pem', 'utf8');
         const httpsServer = https.createServer({ key: privateKey, cert: certificate }, this.app);
         
-        httpsServer.listen(this.port, () => {
+        httpsServer.listen(this.port, '0.0.0.0', () => {
           console.log(`🔒 HTTPS Server running on https://localhost:${this.port}`);
+          console.log(`📱 Network access: https://192.168.7.239:${this.port}`);
+          console.log(`🌐 Access from iPhone: https://192.168.7.239:${this.port}`);
         });
         return;
 
@@ -559,8 +585,10 @@ class CalendarService {
     }
 
     // In production or if HTTPS setup fails, use HTTP
-    this.app.listen(this.port, () => {
+    this.app.listen(this.port, '0.0.0.0', () => {
       console.log(`🚀 HTTP Server running on http://localhost:${this.port}`);
+      console.log(`📱 Network access: http://192.168.7.239:${this.port}`);
+      console.log(`🌐 Access from iPhone: http://192.168.7.239:${this.port}`);
     });
   }
 }

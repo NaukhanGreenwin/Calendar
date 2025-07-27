@@ -15,7 +15,7 @@ const errorMessage = document.getElementById('errorMessage');
 
 // Global variables
 let currentIcsContent = '';
-let activeInputType = 'rich'; // 'rich', 'plain', or 'file'
+let activeInputType = 'rich'; // 'rich' or 'plain'
 
 // Tab switching functionality
 function switchInputTab(tabType) {
@@ -54,12 +54,6 @@ function getActiveInputContent() {
             return {
                 html: null,
                 text: emailTextarea.value
-            };
-        case 'file':
-            // File content will be handled separately
-            return {
-                html: null,
-                text: ''
             };
         default:
             return { html: null, text: '' };
@@ -112,135 +106,7 @@ function hideContentWarning() {
     }
 }
 
-// File upload functionality
-function setupFileUpload() {
-    // Click to browse
-    fileUploadArea.addEventListener('click', () => {
-        fileUpload.click();
-    });
 
-    // File selection
-    fileUpload.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            handleFileUpload(file);
-        }
-    });
-
-    // Drag and drop
-    fileUploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        fileUploadArea.classList.add('dragover');
-    });
-
-    fileUploadArea.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        fileUploadArea.classList.remove('dragover');
-    });
-
-    fileUploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        fileUploadArea.classList.remove('dragover');
-        const file = e.dataTransfer.files[0];
-        if (file) {
-            handleFileUpload(file);
-        }
-    });
-}
-
-// Handle file upload
-function handleFileUpload(file) {
-    const fileExt = file.name.toLowerCase().split('.').pop();
-
-    // For PDF files, use the API endpoint
-    if (fileExt === 'pdf') {
-        handlePdfUpload(file);
-        return;
-    }
-
-    // For other files, use FileReader as before
-    const reader = new FileReader();
-
-    reader.onload = function (e) {
-        const content = e.target.result;
-
-        // Switch to plain text tab and populate
-        switchInputTab('plain');
-        emailTextarea.value = content;
-        updateCharacterCount();
-
-        // Visual feedback
-        showSuccess(`File "${file.name}" loaded successfully!`);
-    };
-
-    reader.onerror = function () {
-        showError('Failed to read the file. Please try again.');
-    };
-
-    reader.readAsText(file);
-}
-
-// Handle PDF file upload via API
-async function handlePdfUpload(file) {
-    try {
-        // Show loading state
-        const uploadArea = document.getElementById('fileUploadArea');
-        const originalContent = uploadArea.innerHTML;
-        uploadArea.classList.add('processing');
-        uploadArea.innerHTML = `
-            <div class="upload-content">
-                <div class="upload-icon">📄</div>
-                <div class="upload-text">
-                    <strong class="pdf-processing">Processing PDF...</strong>
-                    <div class="upload-formats">Extracting text from ${file.name}</div>
-                </div>
-            </div>
-        `;
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const response = await fetch('/api/upload-file', {
-            method: 'POST',
-            body: formData
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.message || data.error || 'Failed to process PDF');
-        }
-
-        // Switch to plain text tab and populate with extracted text
-        switchInputTab('plain');
-        emailTextarea.value = data.extractedText;
-        updateCharacterCount();
-
-        // Visual feedback
-        showSuccess(`PDF "${data.filename}" processed successfully! Extracted ${data.textLength} characters.`);
-
-        // Reset upload area
-        uploadArea.classList.remove('processing');
-        uploadArea.innerHTML = originalContent;
-
-    } catch (error) {
-        console.error('PDF upload error:', error);
-        showError(`Failed to process PDF: ${error.message}`);
-
-        // Reset upload area
-        const uploadArea = document.getElementById('fileUploadArea');
-        uploadArea.classList.remove('processing');
-        uploadArea.innerHTML = `
-            <div class="upload-content">
-                <div class="upload-icon">📎</div>
-                <div class="upload-text">
-                    <strong>Drop email file here or click to browse</strong>
-                    <div class="upload-formats">Supports: .eml, .msg, .txt, .html, .pdf files</div>
-                </div>
-            </div>
-        `;
-    }
-}
 
 // Show success message
 function showSuccess(message) {
@@ -302,6 +168,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Setup keyboard shortcuts
     setupKeyboardShortcuts();
+
+    // Setup How to Use modal
+    setupHowToUseModal();
+
+
 
     // Setup clear button
     clearBtn.addEventListener('click', function () {
@@ -775,23 +646,6 @@ function clearAll() {
     emailTextarea.value = '';
     richContentDiv.innerHTML = '';
 
-    // Reset file upload area
-    const fileUploadArea = document.getElementById('fileUploadArea');
-    fileUploadArea.innerHTML = `
-        <div class="upload-content">
-            <div class="upload-icon">📎</div>
-            <div class="upload-text">
-                <strong>Drop email file here or click to browse</strong>
-                <div class="upload-formats">Supports: .eml, .msg, .txt, .html, .pdf files</div>
-            </div>
-        </div>
-    `;
-    fileUploadArea.classList.remove('processing');
-
-    // Reset file input
-    const fileInput = document.getElementById('fileUpload');
-    fileInput.value = '';
-
     // Hide results and errors
     hideResults();
     hideError();
@@ -811,6 +665,57 @@ function clearAll() {
 
 
 
+// Setup How to Use modal functionality
+function setupHowToUseModal() {
+    const howToUseBtn = document.getElementById('howToUseBtn');
+    const howToUseModal = document.getElementById('howToUseModal');
+    const closeHowToUse = document.getElementById('closeHowToUse');
+
+    // Open modal
+    howToUseBtn.addEventListener('click', function() {
+        howToUseModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        
+        // Ensure modal content can scroll on mobile
+        setTimeout(() => {
+            const modalBody = document.querySelector('.how-to-use-body');
+            if (modalBody) {
+                modalBody.scrollTop = 0;
+                // Force a reflow to ensure scrolling works
+                modalBody.style.overflow = 'auto';
+            }
+        }, 50);
+    });
+
+    // Close modal
+    closeHowToUse.addEventListener('click', function() {
+        howToUseModal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+        document.body.style.position = '';
+        document.body.style.top = '';
+    });
+
+    // Close modal when clicking outside
+    howToUseModal.addEventListener('click', function(e) {
+        if (e.target === howToUseModal) {
+            howToUseModal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+            document.body.style.position = '';
+            document.body.style.top = '';
+        }
+    });
+
+    // Close modal with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && howToUseModal.style.display === 'flex') {
+            howToUseModal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+            document.body.style.position = '';
+            document.body.style.top = '';
+        }
+    });
+}
+
 // Handle Enter key in inputs (Ctrl/Cmd + Enter to submit)
 function setupKeyboardShortcuts() {
     const handleKeyDown = function (event) {
@@ -825,6 +730,8 @@ function setupKeyboardShortcuts() {
     emailTextarea.addEventListener('keydown', handleKeyDown);
     richContentDiv.addEventListener('keydown', handleKeyDown);
 }
+
+
 
 // Error handling for network issues
 window.addEventListener('online', function () {
