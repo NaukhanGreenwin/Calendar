@@ -266,6 +266,13 @@ class CalendarService {
           - Look for phrases like "invited:", "attendees:", "participants:"
           - Include the sender and recipients as attendees
           - Format as: [{"name": "John Doe", "email": "john@company.com"}, ...]
+      4b. **Location Extraction (CRITICAL):**
+          - ALWAYS extract location information if ANY is mentioned
+          - Look for: addresses, building names, room numbers, restaurant names, etc.
+          - For "CN Tower" → name: "CN Tower", address: "290 Bremner Blvd, Toronto, ON M5V 3L9"
+          - For "Jack Astors" → name: "Jack Astors", try to include address if known
+          - For "Conference Room B" → name: "Conference Room B", include building if mentioned
+          - NEVER leave location empty if ANY location info exists in the text
       5.  **Location Intelligence:** 
           - Extract venue names, business names, or place names mentioned in the text
           - If you recognize well-known places (Google HQ, Apple Park, Harvard University, Central Park, etc.), provide their common address
@@ -424,7 +431,9 @@ class CalendarService {
       'VERSION:2.0',
       'PRODID:-//AiCal//Event Extractor//EN',
       'CALSCALE:GREGORIAN',
-      'METHOD:REQUEST'
+      'METHOD:REQUEST',
+      'X-WR-CALNAME:Calendar Invitation',
+      'X-WR-TIMEZONE:UTC'
     ];
 
     // Add each event
@@ -433,6 +442,8 @@ class CalendarService {
       
       // Build comprehensive location string for ICS
       let icsLocation = location || '';
+      console.log('Event location data:', { location, locationDetails }); // Debug logging
+      
       if (locationDetails) {
         const locationParts = [];
         if (locationDetails.name) locationParts.push(locationDetails.name);
@@ -450,6 +461,8 @@ class CalendarService {
         }
         icsLocation = locationParts.join(', ') || icsLocation;
       }
+      
+      console.log('Final ICS location:', icsLocation); // Debug logging
 
       icsParts.push(
         'BEGIN:VEVENT',
