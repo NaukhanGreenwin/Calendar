@@ -514,16 +514,9 @@ function displayEventDetails(eventData, warnings) {
 
     // Add attendees if available
     if (eventData.attendees && eventData.attendees.length > 0) {
-        const attendeesList = eventData.attendees.map(attendee => {
-            if (typeof attendee === 'object' && attendee.email) {
-                return `${attendee.name || attendee.email} <${attendee.email}>`;
-            }
-            return attendee;
-        }).join(', ');
-        
         fields.push({ 
             label: 'Attendees', 
-            value: attendeesList, 
+            value: '', // We'll handle this in the display function
             icon: '👥',
             isAttendees: true
         });
@@ -597,18 +590,44 @@ function displayEventDetails(eventData, warnings) {
             } else if (field.isAttendees) {
                 // Handle attendees display with email links
                 const attendees = eventData.attendees || [];
+                console.log('Attendees data:', attendees); // Debug logging
+                
                 let attendeesHtml = `<strong>${field.icon} ${field.label}:</strong><div class="attendees-list">`;
                 
                 attendees.forEach((attendee, index) => {
-                    if (typeof attendee === 'object' && attendee.email) {
-                        attendeesHtml += `
-                            <div class="attendee-item">
-                                <span class="attendee-name">${escapeHtml(attendee.name || attendee.email)}</span>
-                                <a href="mailto:${escapeHtml(attendee.email)}" class="attendee-email">${escapeHtml(attendee.email)}</a>
-                            </div>
-                        `;
+                    console.log('Processing attendee:', attendee, typeof attendee); // Debug logging
+                    
+                    if (typeof attendee === 'object' && attendee !== null) {
+                        if (attendee.email) {
+                            // Object with email
+                            attendeesHtml += `
+                                <div class="attendee-item">
+                                    <span class="attendee-name">${escapeHtml(attendee.name || attendee.email)}</span>
+                                    <a href="mailto:${escapeHtml(attendee.email)}" class="attendee-email">${escapeHtml(attendee.email)}</a>
+                                </div>
+                            `;
+                        } else {
+                            // Object without email - try to extract info
+                            const attendeeStr = JSON.stringify(attendee);
+                            attendeesHtml += `<div class="attendee-item"><span class="attendee-name">${escapeHtml(attendeeStr)}</span></div>`;
+                        }
+                    } else if (typeof attendee === 'string') {
+                        // String attendee
+                        if (attendee.includes('@')) {
+                            // Looks like an email
+                            attendeesHtml += `
+                                <div class="attendee-item">
+                                    <span class="attendee-name">${escapeHtml(attendee.split('@')[0])}</span>
+                                    <a href="mailto:${escapeHtml(attendee)}" class="attendee-email">${escapeHtml(attendee)}</a>
+                                </div>
+                            `;
+                        } else {
+                            // Just a name
+                            attendeesHtml += `<div class="attendee-item"><span class="attendee-name">${escapeHtml(attendee)}</span></div>`;
+                        }
                     } else {
-                        attendeesHtml += `<div class="attendee-item"><span class="attendee-name">${escapeHtml(attendee)}</span></div>`;
+                        // Fallback for unexpected types
+                        attendeesHtml += `<div class="attendee-item"><span class="attendee-name">${escapeHtml(String(attendee))}</span></div>`;
                     }
                 });
                 

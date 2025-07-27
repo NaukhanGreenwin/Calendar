@@ -423,7 +423,8 @@ class CalendarService {
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//AiCal//Event Extractor//EN',
-      'CALSCALE:GREGORIAN'
+      'CALSCALE:GREGORIAN',
+      'METHOD:REQUEST'
     ];
 
     // Add each event
@@ -459,22 +460,25 @@ class CalendarService {
         `SUMMARY:${title || 'No Title'}`,
         `DESCRIPTION:${(description || '').replace(/\n/g, '\\n')}`,
         `LOCATION:${icsLocation}`,
-        'STATUS:CONFIRMED'
+        'STATUS:CONFIRMED',
+        'SEQUENCE:0',
+        'TRANSP:OPAQUE'
       );
 
       // Add organizer (first attendee or default)
       if (attendees && attendees.length > 0 && attendees[0].email) {
         const organizer = attendees[0];
-        const organizerName = organizer.name ? organizer.name : organizer.email;
-        icsParts.push(`ORGANIZER;CN=${organizerName}:mailto:${organizer.email}`);
+        const organizerName = organizer.name ? organizer.name : organizer.email.split('@')[0];
+        icsParts.push(`ORGANIZER;CN="${organizerName}":mailto:${organizer.email}`);
       }
 
       // Add attendees if available
       if (attendees && Array.isArray(attendees)) {
         attendees.forEach(attendee => {
           if (attendee.email) {
-            const attendeeName = attendee.name ? attendee.name : attendee.email;
-            icsParts.push(`ATTENDEE;CN=${attendeeName};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${attendee.email}`);
+            const attendeeName = attendee.name ? attendee.name : attendee.email.split('@')[0];
+            // Properly format attendee line with quotes around name
+            icsParts.push(`ATTENDEE;CN="${attendeeName}";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${attendee.email}`);
           }
         });
       }
